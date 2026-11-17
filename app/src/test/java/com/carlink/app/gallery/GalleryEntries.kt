@@ -64,7 +64,7 @@ private val previewWheelKeys = mapOf(WheelAction.VOICE to 84, WheelAction.HANG_U
  * content composable (the one its @Preview functions use) with preview fakes.
  */
 val galleryEntries: List<GalleryEntry> = (homeEntries() + settingsEntries() + diagnosticsEntries() + aboutEntries() + switcherEntries() + updateEntries() +
-    setupEntries()).also { entries ->
+    setupEntries() + f150Entries()).also { entries ->
         check(entries.map { it.area to it.name }.toSet().size == entries.size) {
             "Gallery entry names must be unique per area"
         }

@@ -52,6 +52,7 @@ data class GalleryConfig(
     val lite: Boolean = false,
     /** "area/name" of the entries this config renders, whatever their [GalleryEntry.configs]; null for the usual rules. */
     val entries: Set<String>? = null,
+    val interfaceScale: Float = 1f,
 )
 
 /** The low-end head-unit configs render these states (docs/LOW_END_PERFORMANCE.md). */
@@ -67,6 +68,11 @@ private val lowEndEntries = setOf("home/ready-no-phone", "home/failed-same-wifi-
     "settings/sheet-wheel-keys", "settings/sheet-wheel-keys-learning")
 
 val galleryConfigs = listOf(
+    GalleryConfig("f150-headunit", UiProfile.CAR, "w1024dp-h600dp-land-mdpi",
+        entries = f150States, interfaceScale = 1.15f),
+    GalleryConfig("f150-portrait", UiProfile.CAR, "w768dp-h1024dp-port-mdpi",
+        entries = f150States, interfaceScale = 1.15f),
+    GalleryConfig("f150-phone", UiProfile.HANDHELD, "w400dp-h860dp-port-xxhdpi", entries = f150States),
     // The user's Redmi Pad Pro: 2560×1600px at 281dpi, about 1460×914dp in landscape (HANDHELD).
     GalleryConfig("tablet", UiProfile.HANDHELD, "w1463dp-h914dp-land-280dpi",
         themes = listOf(ThemeMode.DARK, ThemeMode.LIGHT)),
@@ -151,7 +157,8 @@ class ScreenshotGallery {
             scenario.onActivity { activity ->
                 activity.setContent {
                     val themed = @Composable {
-                        CarLinkTheme(profile = config.profile, themeMode = theme, liteRendering = config.lite) { entry.content() }
+                        CarLinkTheme(profile = config.profile, themeMode = theme, interfaceScale = config.interfaceScale,
+                            liteRendering = config.lite) { entry.content() }
                     }
                     val split = config.splitWidthDp
                     if (split == null) {

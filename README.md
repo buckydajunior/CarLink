@@ -1,3 +1,31 @@
+# F-150 CarPlay — personal Linkswell fork
+
+This fork targets a **2018 Ford F-150 Lariat with a Linkswell head unit**.
+
+- **USB CarPlay only:** plug in an iPhone to start; wireless and Android Auto entry points are disabled.
+- Opens directly to the USB connection screen; no welcome wizard or branded Android launch icon.
+- Settings offers CarPlay icon sizes above upstream's Large preset. Extra large is the default;
+  unplug and reconnect the phone after changing size. This changes the dimensions reported to
+  the iPhone, preserving video resolution; the exact iOS layout needs testing on the head unit.
+- Startup skips Bluetooth name lookups, duplicate USB rescans and Android Auto initialization.
+  Concurrent session/warmup requests share one decoder scan. The waiting view uses native widgets.
+- Uses its own package (`com.buckydajunior.carlink.f150`, debug suffix `.debug`). Upstream's
+  updater and floating phone switcher are off. Shared vendor engine libraries remain in the source.
+
+**Build and hardware status:** all five unit-test suites pass locally (5,243 passed, two skipped).
+Debug and R8-optimized release builds compile. The new screens are rendered at landscape head-unit,
+portrait head-unit and phone sizes. Exact commands and validation are recorded in the fork's change request. A real USB connection, Siri/calls, reconnect after ignition and icon sizes must still be
+verified on this Linkswell. Ordinary source builds contain **no CarPlay authentication identity**;
+provide local assets as described in [Building](docs/BUILDING.md#carplay-authentication-files-not-in-git).
+No authentication identity or signing key is committed to this fork. A local test APK can reuse
+the public experimental identity from the verified upstream v1.0.16 APK; it is not Apple-certified
+and its acceptance depends on the iPhone/iOS version.
+
+The original project's documentation and credits follow. Its wireless/Android Auto features
+and upstream release instructions describe the original app, rather than this USB-only product.
+
+---
+
 <div align="center">
 
 <picture>

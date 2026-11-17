@@ -262,7 +262,8 @@ class CarPlayAdapter internal constructor(
                 }
             }
             // DiPlay's dial waits for CarLink's own page of the iPhone instead of racing its SDP.
-            WirelessStartupTimeline.beforeBluetoothDial = BluetoothWarmup::awaitPage
+            WirelessStartupTimeline.beforeBluetoothDial =
+                if (CarLinkCore.connectionPolicy.wireless) BluetoothWarmup::awaitPage else null
             CarPlayWaitingView.install()
             // Each session also declares the larger interface sizes as smaller areas, so the switcher changes size live.
             CarPlayHostIntegration.liveSizeWidthsMm = com.carlink.core.settings.InterfaceSize.entries.mapNotNull(CarPlaySettingsPolicy::widthMm)

@@ -5,6 +5,8 @@ import android.bluetooth.BluetoothManager
 import android.content.Context
 import android.hardware.usb.UsbDevice
 import com.carlink.core.connection.DeviceEnvironment
+import com.carlink.core.connection.CarLinkCore
+import com.carlink.core.connection.ConnectionPolicy
 import com.carlink.core.core.PhoneKind
 import java.util.Locale
 
@@ -15,7 +17,17 @@ import java.util.Locale
  */
 object UsbPhoneNames {
     @SuppressLint("MissingPermission") // Bonded devices are read only when the permission allows; else the fallback.
-    fun resolve(context: Context, kind: PhoneKind, device: UsbDevice): String {
+    fun resolve(context: Context, kind: PhoneKind, device: UsbDevice): String =
+        resolve(kind, runCatching { device.manufacturerName }.getOrNull(), CarLinkCore.connectionPolicy) {
+            pairedName(context, kind)
+        }
+
+    /** Naming a cable must not start Bluetooth IPC in a dedicated wired receiver. */
+    internal fun resolve(kind: PhoneKind, manufacturer: String?, policy: ConnectionPolicy, pairedName: () -> String?): String =
+        (if (policy.wireless) pairedName() else null) ?: fallback(kind, manufacturer)
+
+    @SuppressLint("MissingPermission")
+    private fun pairedName(context: Context, kind: PhoneKind): String? {
         val app = context.applicationContext
         val known = KnownPhones(app)
         val paired = runCatching {
@@ -26,7 +38,7 @@ object UsbPhoneNames {
         val last = DeviceEnvironment.lastPhoneAddress(app)
         paired.firstOrNull { it.first.equals(last, ignoreCase = true) }?.let { return it.second }
         if (paired.size == 1) return paired.single().second
-        return fallback(kind, runCatching { device.manufacturerName }.getOrNull())
+        return null
     }
 
     internal fun fallback(kind: PhoneKind, manufacturer: String?): String = when (kind) {

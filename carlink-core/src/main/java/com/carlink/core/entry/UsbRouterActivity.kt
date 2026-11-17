@@ -11,6 +11,8 @@ import android.util.Log
 import com.carlink.core.core.PhoneKind
 import com.carlink.core.detect.PhoneClassifier
 import com.carlink.core.connection.Connection
+import com.carlink.core.connection.CarLinkCore
+import com.carlink.core.core.Transport
 
 /**
  * CarLink's only USB_DEVICE_ATTACHED handler (both engines' filters are removed from the merged
@@ -37,6 +39,7 @@ class UsbRouterActivity : Activity() {
         Log.i(TAG, "USB ${"%04x:%04x".format(device.vendorId, device.productId)} -> $kind")
         com.carlink.core.diagnostics.EventLog.add("USB", "${"%04x:%04x".format(device.vendorId, device.productId)} -> $kind")
         if (kind == PhoneKind.UNKNOWN) return
+        if (kind.engine?.let { CarLinkCore.connectionPolicy.allows(it, Transport.USB) } != true) return
         if (!UsbWatcher.get(this).claim(device)) {
             Log.i(TAG, "USB attach already routed by the watcher")
             return

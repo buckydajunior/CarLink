@@ -156,6 +156,7 @@ class SessionManager(
     private val profiles: ConnectionProfiles = ConnectionProfiles(),
     /** Monotonic time for phase durations and deadlines. */
     private val clock: () -> Long = SystemClock::uptimeMillis,
+    private val connectionPolicy: ConnectionPolicy = ConnectionPolicy.ALL,
 ) {
     /** Everything [SessionManager] reads from the device and the stored preferences. */
     interface Environment {
@@ -334,7 +335,8 @@ class SessionManager(
     /** A phone was plugged in. USB is a deliberate act, so it may replace a wireless session. */
     fun onUsbPhone(kind: PhoneKind, phoneName: String?, attach: Intent?) {
         val engine = kind.engine ?: return
-        if (!environment.autoConnectUsb) return note("USB $engine phone: automatic USB start is off")
+        if (!connectionPolicy.allows(engine, Transport.USB)) return
+        if (!connectionPolicy.alwaysConnectUsb && !environment.autoConnectUsb) return note("USB $engine phone: automatic USB start is off")
         val current = _state.value
         // Both engines re-enumerate the phone on purpose while connecting (CarPlay's
         // configuration switch, Android Auto's accessory switch); each is a new attach.
@@ -425,6 +427,7 @@ class SessionManager(
     /** A paired phone's Bluetooth link came up. Never interrupts a running session. */
     fun onBluetoothPhone(address: String, kind: PhoneKind, phoneName: String?) {
         val engine = kind.engine ?: return
+        if (!connectionPolicy.allows(engine, Transport.WIRELESS)) return
         when {
             !environment.autoConnectBluetooth -> note("Bluetooth $engine phone: automatic start is off")
             // Nothing wireless can start here; neither a start nor a switch offer would help.
@@ -468,6 +471,7 @@ class SessionManager(
      */
     fun onPairingLost(address: String, kind: PhoneKind, phoneName: String?) {
         val engine = kind.engine ?: return
+        if (!connectionPolicy.allows(engine, Transport.WIRELESS)) return
         val current = _state.value
         if (current is SessionState.Active) {
             val samePhone = current.request.phoneAddress?.equals(address, ignoreCase = true) == true
@@ -486,6 +490,7 @@ class SessionManager(
      */
     fun onHomeShown(address: String?, kind: PhoneKind?, phoneName: String?) {
         val engine = kind?.engine ?: return
+        if (!connectionPolicy.allows(engine, Transport.WIRELESS)) return
         if (address == null) return
         val now = SystemClock.uptimeMillis()
         when {
@@ -515,10 +520,13 @@ class SessionManager(
      * as in [onHomeShown]; an iPhone and an Android phone both in reach make Home ask instead.
      */
     fun onHomeShown(options: List<PhoneOption>, lastPhone: String?) {
+        if (!connectionPolicy.wireless) return
         val now = SystemClock.uptimeMillis()
         if (!environment.autoConnectBluetooth || environment.autoConnectPaused || _state.value !is SessionState.Idle) return
         // Phones that cannot start wirelessly here (or are on USB) are no candidates.
-        val usable = options.filter { o -> o.kind.engine?.let { !environment.wirelessUnavailable(it) && !usbHolds(it) } == true }
+        val usable = options.filter { o -> o.kind.engine?.let {
+            connectionPolicy.allows(it, Transport.WIRELESS) && !environment.wirelessUnavailable(it) && !usbHolds(it)
+        } == true }
         when (val decision = PhoneChoice.decide(usable, lastPhone)) {
             is PhoneChoice.Decision.Start -> onHomeShown(decision.phone.address, decision.phone.kind, decision.phone.name)
             is PhoneChoice.Decision.Ask -> {
@@ -551,6 +559,7 @@ class SessionManager(
      * Needs no phone, Bluetooth or Wi-Fi, so pre-flight is skipped.
      */
     fun startSelf() {
+        if (!connectionPolicy.allows(Engine.ANDROID_AUTO, Transport.WIRELESS)) return
         _pendingChoice.value = null
         environment.autoConnectPaused = false
         start(SessionRequest(Engine.ANDROID_AUTO, Transport.WIRELESS, null, null, selfMode = true))
@@ -559,6 +568,7 @@ class SessionManager(
     /** The driver asked for this phone. Clears the pause and replaces any running session. */
     fun connect(address: String?, kind: PhoneKind, phoneName: String?, transport: Transport = Transport.WIRELESS) {
         val engine = kind.engine ?: return
+        if (!connectionPolicy.allows(engine, transport)) return
         _pendingChoice.value = null // the driver chose
         environment.autoConnectPaused = false
         // The kind came from Home's list, which may be an old guess; saving it made the guess stick
@@ -637,6 +647,8 @@ class SessionManager(
     // --- Sessions ------------------------------------------------------------------------------
 
     private fun start(request: SessionRequest) {
+        // Keep a working wired projection intact when a stale UI/intent asks for a removed mode.
+        if (!connectionPolicy.allows(request.engine, request.transport)) return
         _pendingChoice.value = null // a phone is starting: an open "Which phone?" is answered
         sessionId++
         note("start ${request.engine} ${request.transport} known=${request.phoneAddress != null}")

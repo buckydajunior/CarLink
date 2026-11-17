@@ -10,6 +10,13 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class DevicePreflightTest {
+    @Test fun wiredPermissionsExcludeRadiosLocationAndOptionalNotificationsOnEverySupportedSdk() {
+        for (sdk in listOf(25, 29, 31, 33, 37)) {
+            assertEquals("SDK $sdk", listOf(android.Manifest.permission.RECORD_AUDIO),
+                DevicePreflight.requiredPermissions(Transport.USB, sdk))
+        }
+    }
+
     private val ready = DevicePreflight.Facts(bluetoothOn = true, phoneBonded = true, wifiOn = true, locationOn = true,
         missingPermissions = emptyList(), canDrawOverlays = true)
     private val wireless = SessionRequest(Engine.ANDROID_AUTO, Transport.WIRELESS, "AA:BB", "Pixel")

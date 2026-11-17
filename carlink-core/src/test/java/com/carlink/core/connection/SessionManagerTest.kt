@@ -118,9 +118,10 @@ class SessionManagerTest {
     private val notes = mutableListOf<String>()
     private var profiles = ConnectionProfiles()
 
-    private fun manager() = SessionManager(
+    private fun manager(connectionPolicy: ConnectionPolicy = ConnectionPolicy.ALL) = SessionManager(
         mapOf(Engine.CARPLAY to carPlay, Engine.ANDROID_AUTO to androidAuto), env,
         applySettings = { applied += it }, worker = { it.run() }, profiles = profiles,
+        connectionPolicy = connectionPolicy,
     )
 
     private fun idle() = shadowOf(Looper.getMainLooper()).idle()
@@ -128,6 +129,68 @@ class SessionManagerTest {
     private val starts get() = log.filter { "start" in it }
 
     // --- Basic flow ---------------------------------------------------------------------------
+
+    @Test fun wiredCarPlayProductStartsOnPlugInEvenWithAnOldAutoConnectPreferenceOff() {
+        env.autoConnectUsb = false
+        env.autoConnectPaused = true
+        env.wirelessUnavailable = true
+        val m = manager(ConnectionPolicy.USB_CARPLAY_ONLY)
+        val attach = Intent(UsbManager.ACTION_USB_DEVICE_ATTACHED)
+        m.onUsbPhone(PhoneKind.IPHONE, "iPhone", attach)
+        idle()
+        assertEquals(listOf("CARPLAY start USB null"), starts)
+        assertEquals(attach, applied.single().usbAttach)
+        assertEquals(Transport.USB, applied.single().transport)
+        assertEquals(0, env.warmUps)
+    }
+
+    @Test fun wiredCarPlayProductIgnoresAndroidAndWirelessEntryPoints() {
+        env.warmUpAvailable = true
+        problems = { _, _ -> error("An unsupported trigger reached preflight") }
+        val m = manager(ConnectionPolicy.USB_CARPLAY_ONLY)
+        m.onUsbPhone(PhoneKind.ANDROID, "Pixel", Intent())
+        m.connect("AA:BB", PhoneKind.ANDROID, "Pixel", Transport.USB)
+        m.connect("AA:BB", PhoneKind.IPHONE, "iPhone")
+        m.onBluetoothPhone("AA:BB", PhoneKind.IPHONE, "iPhone")
+        m.onPairingLost("AA:BB", PhoneKind.IPHONE, "iPhone")
+        m.onHomeShown("AA:BB", PhoneKind.IPHONE, "iPhone")
+        m.onHomeShown(listOf(PhoneOption("AA:BB", "iPhone", PhoneKind.IPHONE, true),
+            PhoneOption("CC:DD", "Pixel", PhoneKind.ANDROID, true)), "AA:BB")
+        m.startSelf()
+        idle()
+        assertEquals(SessionState.Idle, m.state.value)
+        assertEquals(null, m.pendingSwitch.value)
+        assertEquals(null, m.pendingChoice.value)
+        assertTrue(starts.isEmpty())
+        assertTrue(rememberedKinds.isEmpty())
+        assertEquals(0, env.warmUps)
+    }
+
+    @Test fun removedModesCannotInterruptAnActiveWiredCarPlayProjection() {
+        val m = manager(ConnectionPolicy.USB_CARPLAY_ONLY)
+        m.onUsbPhone(PhoneKind.IPHONE, "iPhone", Intent()); idle()
+        carPlay.emit(AdapterEvent.Connected); idle()
+        val connected = m.state.value
+        m.connect("AA:BB", PhoneKind.ANDROID, "Pixel", Transport.USB)
+        m.connect("CC:DD", PhoneKind.IPHONE, "iPhone")
+        m.onBluetoothPhone("EE:FF", PhoneKind.IPHONE, "Passenger")
+        m.startSelf()
+        idle()
+        assertEquals(connected, m.state.value)
+        assertEquals(1, starts.size)
+        assertTrue(log.none { "stop" in it })
+        assertEquals(null, m.pendingSwitch.value)
+    }
+
+    @Test fun wiredCarPlayFailureNeverFallsBackToWireless() {
+        val m = manager(ConnectionPolicy.USB_CARPLAY_ONLY)
+        m.onUsbPhone(PhoneKind.IPHONE, "iPhone", Intent()); idle()
+        carPlay.emit(AdapterEvent.Failed(FailureReason.PHONE_NEVER_REACHED_CAR)); idle()
+        assertTrue(m.state.value is SessionState.Failed)
+        assertEquals(listOf("CARPLAY start USB null"), starts)
+        assertTrue(applied.all { it.transport == Transport.USB && it.path == null })
+        assertEquals(0, env.warmUps)
+    }
 
     @Test fun connectWritesSettingsThenStartsOnTheFirstPath() {
         val m = manager()

@@ -61,11 +61,13 @@ interface CarLinkHost {
  * @param host see [CarLinkHost].
  * @param waitingView what CarPlay's projection window shows until the picture appears; null shows a
  *   neutral progress indicator. See [CarPlayWaitingView].
+ * @param connectionPolicy fixed product capabilities; dedicated receivers can allow wired CarPlay only.
  */
 class CarLinkConfig(
     val accessoryName: String,
     val host: CarLinkHost,
     val waitingView: ((Context) -> View)? = null,
+    val connectionPolicy: ConnectionPolicy = ConnectionPolicy.ALL,
 )
 
 /**
@@ -80,6 +82,10 @@ object CarLinkCore {
     val config: CarLinkConfig
         get() = installed ?: error("CarLinkCore.install(application, config) was not called")
 
+    /** The generic policy also applies before installation (e.g. standalone library tests). */
+    val connectionPolicy: ConnectionPolicy
+        get() = installed?.connectionPolicy ?: ConnectionPolicy.ALL
+
     /**
      * Installs the engines' hooks for this process. Main process: the connection log
      * (`files/logs/carlink.log`), the CarPlay hooks and waiting view, USB watching, and (after
@@ -91,19 +97,27 @@ object CarLinkCore {
         // Both processes ask for USB access; each times the attaches itself (UsbAttachTimes).
         com.carlink.core.detect.UsbAttachTimes.watch(app)
         if (isAndroidAutoProcess(app)) {
+            if (!config.connectionPolicy.androidAuto) return
             nameCarForPhone(app, config.accessoryName)
             // No sticky or self-restarting engine (DA§10.6.1), no BYD window claim off a BYD
             // (DA§12 #8), engine events and states to the main process.
             AaEngineHooks.install(app)
         } else {
             EventLog.attachFile(java.io.File(app.filesDir, "logs"))
+            if (!config.connectionPolicy.wireless) {
+                // The engine also opens from its own notification; stale engine preferences must
+                // never turn that entry point into a wireless start in a wired-only product.
+                AirPlayPersistence.saveWirelessEnabled(app, false)
+            }
             // Before Home's automatic start reads a phone's type: old guessed types go (KnownPhones).
-            val paths = PathMemory(app)
-            com.carlink.core.detect.KnownPhones(app).dropUnprovenAndroid { paths.lastWorking(com.carlink.core.core.Engine.ANDROID_AUTO, it) != null }
-                .takeIf { it.isNotEmpty() }?.let { EventLog.add("CarLink", "dropped ${it.size} guessed Android phone type(s)") }
+            if (config.connectionPolicy.wireless) {
+                val paths = PathMemory(app)
+                com.carlink.core.detect.KnownPhones(app).dropUnprovenAndroid { paths.lastWorking(com.carlink.core.core.Engine.ANDROID_AUTO, it) != null }
+                    .takeIf { it.isNotEmpty() }?.let { EventLog.add("CarLink", "dropped ${it.size} guessed Android phone type(s)") }
+            }
             // Once per app start: what this stereo's Bluetooth is (its own thread; ~300 ms at most
             // for the port check). Its block goes into carlink.log; pre-flight reads it.
-            com.carlink.core.detect.ExternalBluetoothProbe.start(app)
+            if (config.connectionPolicy.wireless) com.carlink.core.detect.ExternalBluetoothProbe.start(app)
             nameCarForIphone(app, config.accessoryName)
             // The car's name, the vehicle profile's BYD gate, the waiting view (DIPLAY.md §12, F2).
             CarPlayAdapter.install(app, Connection.vehicleProfile(app))

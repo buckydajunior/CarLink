@@ -2,82 +2,76 @@ package com.carlink.app.ui.home
 
 import android.content.Context
 import android.content.Intent
+import android.graphics.Color
+import android.view.Gravity
 import android.view.View
-import androidx.compose.runtime.getValue
-import androidx.compose.ui.platform.ComposeView
-import androidx.compose.ui.platform.ViewCompositionStrategy
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.carlink.core.connection.Connection
-import com.carlink.core.connection.SessionState
-import com.carlink.core.connection.toLinkState
-import com.shilapi.xcertplay.AirPlayPersistence
-import com.carlink.core.core.PhoneKind
-import com.carlink.core.detect.PairedPhone
-import com.carlink.app.ui.NetworkPreview
-import com.carlink.core.core.LinkProblem
-import com.carlink.core.detect.BluetoothAvailability
-import com.carlink.core.settings.CarLinkPreferences
-import com.carlink.app.ui.UiPreferences
-import com.carlink.app.ui.ConnectionPrefs
+import android.widget.Button
+import android.widget.LinearLayout
+import android.widget.TextView
+import com.carlink.app.R
 import com.carlink.app.ui.HomeActivity
-import com.carlink.app.ui.HomeState
-import com.carlink.app.ui.Route
-import com.carlink.app.ui.theme.CarLinkTheme
-import com.carlink.app.ui.theme.UiProfileDetector
+import com.carlink.core.connection.Connection
+import com.carlink.core.connection.toLinkState
+import com.carlink.core.core.LinkStage
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 
-/**
- * What CarPlay's projection window shows until the picture appears: Home's own connecting,
- * retrying and failure screen, from the same session state, so an iPhone looks exactly like an
- * Android phone while connecting (design/REBUILD_V2.md §7; DIPLAY.md F2).
- */
+/** Lightweight native waiting view: no Compose/font/GPU-probe startup beside USB authentication. */
 object CarPlayWaitingContent {
-    /** The waiting view for [com.carlink.core.connection.CarLinkConfig.waitingView]. */
-    fun create(context: Context): View = ComposeView(context).apply {
-        setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
+    fun create(context: Context): View {
         val session = Connection.get(context)
-        val preferences = UiPreferences(context)
-        val connectionPrefs = CarLinkPreferences(context)
-        val actions = object : HomeActions {
-            override fun disconnect() = session.disconnect()
-            override fun retry() = session.retry()
-            override fun navigate(route: Route) = openHome(context)
-            override fun fix(problem: LinkProblem) = openHome(context)
-            override fun openBluetoothSettings() = openHome(context)
-            override fun turnOnDirectVideo() {
-                AirPlayPersistence.saveDirectVideoOutput(context, true)
-                session.retry()
-            }
+        val density = context.resources.displayMetrics.density
+        fun dp(value: Int) = (value * density).toInt()
+        val title = TextView(context).apply {
+            setTextColor(Color.WHITE)
+            textSize = 30f
+            gravity = Gravity.CENTER
         }
-        setContent {
-            val state by session.state.collectAsStateWithLifecycle()
-            val profile = UiProfileDetector.detect(context, preferences.uiProfileMode)
-            CarLinkTheme(profile, preferences.themeMode, preferences.interfaceScale,
-                com.carlink.app.ui.theme.RenderingPolicy.lite(context, preferences.renderingMode)) {
-                val link = state.toLinkState(AirPlayPersistence.loadDirectVideoOutput(context))
-                // The session's own phone and path, so the status row matches Home's.
-                val active = state as? SessionState.Active
-                // USB sessions have no Bluetooth address; their phone still has a name.
-                val phone = active?.request?.let { request ->
-                    val name = request.phoneName ?: return@let null
-                    PairedPhone(request.phoneAddress ?: "", name, PhoneKind.IPHONE, connected = request.phoneAddress != null)
-                } ?: active?.request?.phoneAddress?.let { PairedPhone(it, "iPhone", PhoneKind.IPHONE, connected = true) }
-                HomeContent(
-                    HomeUi(
-                        home = HomeState(link, listOfNotNull(phone), BluetoothAvailability.READY, phone, null),
-                        connection = ConnectionPrefs(connectionPrefs.autoConnectUsb, connectionPrefs.autoConnectBluetooth,
-                            connectionPrefs.startOnBoot, connectionPrefs.autoConnectPaused),
-                        network = active?.path?.let { NetworkPreview(path = it, ssid = null) },
-                        permissionsNeeded = false,
-                    ),
-                    actions,
-                )
-            }
+        val body = TextView(context).apply {
+            setTextColor(0xFFB8C4D2.toInt())
+            textSize = 22f
+            gravity = Gravity.CENTER
+            setPadding(0, dp(20), 0, dp(28))
         }
-    }
-
-    /** Fixes and settings live in CarLink's Home; the attempt keeps its state there. */
-    private fun openHome(context: Context) {
-        context.startActivity(Intent(context, HomeActivity::class.java)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
+        return object : LinearLayout(context) {
+            private var scope: CoroutineScope? = null
+            override fun onAttachedToWindow() {
+                super.onAttachedToWindow()
+                scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate).also { owner ->
+                    owner.launch {
+                        session.state.collect { state ->
+                            val failed = state.toLinkState().stage == LinkStage.FAILED
+                            title.setText(if (failed) R.string.carlink_f150_failed else R.string.carlink_f150_connecting)
+                            body.setText(if (failed) R.string.carlink_f150_failed_body else R.string.carlink_f150_connecting_body)
+                        }
+                    }
+                }
+            }
+            override fun onDetachedFromWindow() {
+                scope?.cancel()
+                scope = null
+                super.onDetachedFromWindow()
+            }
+        }.apply {
+            layoutParams = android.view.ViewGroup.LayoutParams(-1, -1)
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setBackgroundColor(0xFF0C1016.toInt())
+            setPadding(dp(28), dp(28), dp(28), dp(28))
+            addView(title, LinearLayout.LayoutParams(-1, -2))
+            addView(body, LinearLayout.LayoutParams(-1, -2))
+            addView(Button(context).apply {
+                setText(R.string.carlink_f150_back)
+                textSize = 22f
+                minHeight = dp(76)
+                setOnClickListener {
+                    context.startActivity(Intent(context, HomeActivity::class.java)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
+                }
+            }, LinearLayout.LayoutParams(-2, -2))
+        }
     }
 }

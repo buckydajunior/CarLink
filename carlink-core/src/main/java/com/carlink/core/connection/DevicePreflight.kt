@@ -90,8 +90,13 @@ object DevicePreflight {
     }
 
     @SuppressLint("MissingPermission") // bondedDevices is only read with BLUETOOTH_CONNECT granted.
-    fun facts(context: Context, phoneAddress: String?): Facts {
+    fun facts(context: Context, phoneAddress: String?, transport: Transport = Transport.WIRELESS): Facts {
         val app = context.applicationContext
+        val missing = requiredPermissions(transport).filter { app.checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
+        if (transport == Transport.USB) {
+            return Facts(bluetoothOn = false, phoneBonded = null, wifiOn = false, locationOn = false,
+                missingPermissions = missing, canDrawOverlays = false)
+        }
         val adapter = app.getSystemService(BluetoothManager::class.java)?.adapter
         val canReadBonds = Build.VERSION.SDK_INT < 31 ||
             app.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
@@ -104,25 +109,29 @@ object DevicePreflight {
             phoneBonded = bonded,
             wifiOn = app.getSystemService(WifiManager::class.java)?.isWifiEnabled == true,
             locationOn = location != null && LocationManagerCompat.isLocationEnabled(location),
-            missingPermissions = requiredPermissions().filter { app.checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED },
+            missingPermissions = missing,
             canDrawOverlays = Build.VERSION.SDK_INT < 29 || Settings.canDrawOverlays(app),
             pairingLost = phoneAddress != null && com.carlink.core.detect.PairingLoss.has(app, phoneAddress),
         )
     }
 
     /** Runtime permissions a session needs; the onboarding flow asks for all of them at once. */
-    fun requiredPermissions(): List<String> = buildList {
-        if (Build.VERSION.SDK_INT >= 31) {
+    fun requiredPermissions(transport: Transport = Transport.WIRELESS, sdkInt: Int = Build.VERSION.SDK_INT): List<String> = buildList {
+        if (transport == Transport.USB) {
+            add(Manifest.permission.RECORD_AUDIO)
+            return@buildList
+        }
+        if (sdkInt >= 31) {
             add(Manifest.permission.BLUETOOTH_CONNECT)
             add(Manifest.permission.BLUETOOTH_SCAN)
         }
-        if (Build.VERSION.SDK_INT >= 33) {
+        if (sdkInt >= 33) {
             add(Manifest.permission.NEARBY_WIFI_DEVICES)
             add(Manifest.permission.POST_NOTIFICATIONS)
         }
         add(Manifest.permission.ACCESS_FINE_LOCATION)
         add(Manifest.permission.RECORD_AUDIO)
         // Android 17 drops local-network traffic without it; wireless Android Auto is local traffic too (#38).
-        if (Build.VERSION.SDK_INT >= 37) add(CarPlayPreflight.ACCESS_LOCAL_NETWORK)
+        if (sdkInt >= 37) add(CarPlayPreflight.ACCESS_LOCAL_NETWORK)
     }
 }

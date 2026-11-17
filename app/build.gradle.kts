@@ -102,7 +102,7 @@ android {
     buildTypes {
         debug {
             applicationIdSuffix = providers.gradleProperty("carlink.debugApplicationIdSuffix").get()
-            versionNameSuffix = "-hud-test"
+            versionNameSuffix = "-f150-test"
             ndk { abiFilters += deviceAbis + "x86_64" }
         }
         release {

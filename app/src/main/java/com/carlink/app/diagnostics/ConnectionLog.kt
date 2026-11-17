@@ -182,7 +182,8 @@ object ConnectionLog {
         val dir = File(context.cacheDir, CarLinkFileProvider.SHARED_DIR).apply { mkdirs() }
         dir.listFiles()?.forEach { it.delete() }
         val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
-        val stereo = runCatching { ExternalBluetoothProbe.await(context).format() }.getOrElse { "External Bluetooth probe: failed (${it.message})" }
+        val stereo = if (!com.carlink.core.connection.CarLinkCore.connectionPolicy.wireless) "Connection: USB CarPlay"
+            else runCatching { ExternalBluetoothProbe.await(context).format() }.getOrElse { "External Bluetooth probe: failed (${it.message})" }
         return File(dir, "carlink-connection-log-$stamp.txt").apply { writeText(format(read(context), withProbe(header, stereo))) }
     }
 

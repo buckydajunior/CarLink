@@ -175,6 +175,20 @@ object CarPlayPreflight {
     fun inputs(context: Context, plan: SessionPlan, settings: UnifiedSettings): CarPlayPreflightInput {
         val app = context.applicationContext
         val sdk = Build.VERSION.SDK_INT
+        if (plan.transport == Transport.USB) {
+            // Wired iAP2 uses the cable and VPN-backed NCM interface. Do not inspect wireless
+            // radios, pairings, network names or hotspot automation for this path.
+            return CarPlayPreflightInput(
+                transport = Transport.USB, path = null, sdkInt = sdk,
+                authenticationReady = CarPlayHostIntegration.authenticationError(app) == null,
+                grantedPermissions = emptySet(), vpnConsentGranted = if (CarLinkCore.connectionPolicy == ConnectionPolicy.USB_CARPLAY_ONLY) {
+                    android.net.VpnService.prepare(app) == null
+                } else AdbVpnConsent.ensure(app),
+                bluetoothOn = null, bondedAddresses = null, iphoneAddress = null,
+                wifiOn = false, locationOn = false, homeWifi = settings.homeWifi, carHotspot = settings.carHotspot,
+                joinedNetworks = 0, joinedSsid = null, carHotspotOn = null, carHotspotCanStart = false,
+            )
+        }
         val permissions = buildSet {
             (requiredPermissions(Transport.WIRELESS, plan.path, sdk) + Manifest.permission.ACCESS_FINE_LOCATION +
                 Manifest.permission.BLUETOOTH_CONNECT + ACCESS_LOCAL_NETWORK).forEach {

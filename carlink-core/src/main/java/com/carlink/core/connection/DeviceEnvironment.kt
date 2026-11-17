@@ -9,6 +9,7 @@ import android.util.Log
 import com.andrerinas.openheadunit.connection.ExternalBtTransportPolicy
 import com.carlink.core.core.Engine
 import com.carlink.core.core.PhoneKind
+import com.carlink.core.core.Transport
 import com.carlink.core.detect.ExternalBluetoothProbe
 import com.carlink.core.detect.HeadUnitDetector
 import com.carlink.core.detect.StereoBluetooth
@@ -28,6 +29,7 @@ import com.carlink.core.settings.WirelessPath
  */
 class DeviceEnvironment(
     context: Context,
+    private val connectionPolicy: ConnectionPolicy = CarLinkCore.connectionPolicy,
     private val enginePreflight: (SessionRequest, WirelessPath?) -> List<Problem> = { _, _ -> emptyList() },
 ) : SessionManager.Environment {
     private val app = context.applicationContext
@@ -37,19 +39,26 @@ class DeviceEnvironment(
     private val paths = PathMemory(app)
     private val callMicrophone = CallMicrophoneWatch(app)
 
-    override val autoConnectUsb get() = preferences.autoConnectUsb
-    override val autoConnectBluetooth get() = preferences.autoConnectBluetooth
+    override val autoConnectUsb get() = connectionPolicy.alwaysConnectUsb || preferences.autoConnectUsb
+    override val autoConnectBluetooth get() = connectionPolicy.wireless && preferences.autoConnectBluetooth
     override var autoConnectPaused: Boolean
         get() = preferences.autoConnectPaused
         set(value) { preferences.autoConnectPaused = value }
 
     // The head unit server needs no Bluetooth, so a stereo whose Bluetooth CarLink cannot use still has it (#70).
     override fun wirelessUnavailable(engine: Engine): Boolean =
-        !(engine == Engine.ANDROID_AUTO && unified.load().connectionMethod == ConnectionMethod.HEADUNIT_SERVER) &&
+        !connectionPolicy.allows(engine, Transport.WIRELESS) ||
+        (!(engine == Engine.ANDROID_AUTO && unified.load().connectionMethod == ConnectionMethod.HEADUNIT_SERVER) &&
             wirelessBlocked(effectiveStereo(app), preferences.wirelessOnExternalBluetooth, engine)
+        )
 
     override fun preflight(request: SessionRequest, path: WirelessPath?): List<Problem> {
         val settings = unified.load()
+        if (request.transport == Transport.USB) {
+            // USB has no dependency on either radio, pairings, SSID visibility or Location.
+            return (DevicePreflight.check(request, null, DevicePreflight.facts(app, null, Transport.USB),
+                settings, com.carlink.core.settings.WifiEnvironment(0, null, null)) + enginePreflight(request, null)).distinct()
+        }
         val wifi = WifiEnvironmentReader.read(app, settings)
         val facts = DevicePreflight.facts(app, request.phoneAddress)
         val stereo = effectiveStereo(app)
@@ -65,6 +74,7 @@ class DeviceEnvironment(
     }
 
     override fun wirelessPaths(request: SessionRequest): List<WirelessPath> {
+        if (!connectionPolicy.allows(request.engine, Transport.WIRELESS)) return emptyList()
         val settings = unified.load()
         return WirelessPolicy.candidates(WirelessPolicy.Inputs(
             engine = request.engine,
@@ -106,13 +116,13 @@ class DeviceEnvironment(
         }
     }
 
-    override fun connectedPhones(): List<PhoneOption> = knownPhones.all()
+    override fun connectedPhones(): List<PhoneOption> = if (!connectionPolicy.wireless) emptyList() else knownPhones.all()
         .filterKeys { BluetoothWarmup.linked(app, it) }
         .map { (address, kind) -> PhoneOption(address, knownPhones.nameOf(address), kind, present = true) }
 
     /** The iPhone the stereo's module reported for the last CarPlay link (address, name). */
     override fun modulePhone(engine: Engine): Pair<String, String?>? =
-        if (engine == Engine.CARPLAY) com.shilapi.xcertplay.transport.ModuleIap2Route.lastPhone else null
+        if (connectionPolicy.wireless && engine == Engine.CARPLAY) com.shilapi.xcertplay.transport.ModuleIap2Route.lastPhone else null
 
     override fun usbPhonePresent(engine: Engine): Boolean =
         app.getSystemService(UsbManager::class.java)?.deviceList?.values.orEmpty().any { device ->
@@ -124,8 +134,9 @@ class DeviceEnvironment(
      * and enabled only while Android Auto is engaged, so CarPlay keeps the steering-wheel keys.
      */
     override fun onEngaged(engine: Engine?) {
-        callMicrophone.setWatching(engine != null)
+        callMicrophone.setWatching(engine != null && connectionPolicy.wireless)
         if (preferences.rootMode) kotlin.concurrent.thread(name = "carlink-root") { com.carlink.core.settings.RootMode.projecting(engine != null) }
+        if (!connectionPolicy.androidAuto) return
         val state = if (engine == Engine.ANDROID_AUTO) PackageManager.COMPONENT_ENABLED_STATE_ENABLED
         else PackageManager.COMPONENT_ENABLED_STATE_DISABLED
         ANDROID_AUTO_KEY_RECEIVERS.forEach { name ->
@@ -139,6 +150,7 @@ class DeviceEnvironment(
     }
 
     override fun warmUp(request: SessionRequest, done: () -> Unit): Boolean {
+        if (!connectionPolicy.wireless || request.transport != Transport.WIRELESS) return false
         // The stereo's module reaches the phone itself; paging it on Android's radio only cost 6 s.
         val stereo = effectiveStereo(app)
         val moduleOn = preferences.wirelessOnExternalBluetooth

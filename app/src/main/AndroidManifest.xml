@@ -1,11 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  CarLink's app manifest.
-
-  The connection backend's manifest (carlink-core/src/main/AndroidManifest.xml) declares the USB,
-  boot and Bluetooth entry points and the engines' component overrides (":aa" process, removed
-  launchers and receivers). This file adds CarLink's Application, Home (the launcher) and what
-  only CarLink's own screens need.
+  The F-150 product is a wired CarPlay receiver. The shared backend still includes both engine
+  libraries, so remove their unused Android Auto components and wireless permissions here.
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
@@ -17,10 +13,33 @@
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <!-- Diagnostics asks to keep CarLink ready when the car wakes (DESIGN_SPEC §6.4). -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
-    <!-- The in-app updater (update/): asks GitHub for the latest release and installs a verified
-         APK with PackageInstaller. Both are also declared by the engines; listed here for CarLink. -->
+    <!-- Wired CarPlay carries IP traffic through the USB/VPN bridge. CHANGE_NETWORK_STATE also
+         satisfies connectedDevice foreground-service startup before the USB grant arrives. -->
     <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
+
+    <uses-permission android:name="android.permission.BLUETOOTH" tools:node="remove" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" tools:node="remove" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" tools:node="remove" />
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" tools:node="remove" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" tools:node="remove" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" tools:node="remove" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" tools:node="remove" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" tools:node="remove" />
+    <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" tools:node="remove" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" tools:node="remove" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" tools:node="remove" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" tools:node="remove" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" tools:node="remove" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" tools:node="remove" />
+    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:node="remove" />
+    <uses-permission android:name="android.permission.ACCESS_SUPERUSER" tools:node="remove" />
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" tools:node="remove" />
+    <uses-permission android:name="android.permission.BROADCAST_STICKY" tools:node="remove" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" tools:node="remove" />
+    <uses-permission android:name="android.permission.WRITE_SETTINGS" tools:node="remove" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" tools:node="remove" />
 
     <!-- "Report a problem on GitHub" asks whether any browser opens web links (Android 11+ package visibility). -->
     <queries>
@@ -70,10 +89,45 @@
              data access); Android's recommended setting for measuring release builds. -->
         <profileable android:shell="true" tools:targetApi="29" />
 
-        <!-- PackageInstaller's answer for an update session (update/UpdateInstaller.kt). -->
-        <receiver
-            android:name=".update.UpdateInstallReceiver"
-            android:exported="false" />
+        <!-- Keep the actual wired session and VPN services; location forwarding is not used. -->
+        <service
+            android:name="com.shilapi.xcertplay.DiPlaySessionService"
+            android:foregroundServiceType="connectedDevice|microphone"
+            tools:replace="android:foregroundServiceType" />
+
+        <!-- The shared receiver keeps ignition/boot handling, but Bluetooth must not wake this app. -->
+        <receiver android:name="com.carlink.core.entry.SystemEventReceiver" android:exported="true">
+            <intent-filter tools:node="removeAll" />
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="com.htc.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="com.mediatek.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="com.mediatek.intent.action.BOOT_IPO" />
+                <action android:name="com.fyt.boot.ACCON" />
+                <action android:name="com.glsx.boot.ACCON" />
+                <action android:name="android.intent.action.ACTION_MT_COMMAND_SLEEP_OUT" />
+                <action android:name="com.cayboy.action.ACC_ON" />
+                <action android:name="com.carboy.action.ACC_ON" />
+            </intent-filter>
+        </receiver>
+
+        <receiver android:name=".update.UpdateInstallReceiver" tools:node="remove" />
+        <receiver android:name="com.carlink.core.connection.aa.AaCommandReceiver" tools:node="remove" />
+        <receiver android:name="androidx.media.session.MediaButtonReceiver" tools:node="remove" />
+        <receiver android:name="com.andrerinas.openheadunit.app.RemoteControlReceiver" tools:node="remove" />
+        <receiver android:name="com.andrerinas.openheadunit.connection.CarKeyReceiver" tools:node="remove" />
+        <provider android:name="com.carlink.core.engine.AndroidAutoSettingsProvider" tools:node="remove" />
+        <provider android:name="rikka.shizuku.ShizukuProvider" tools:node="remove" />
+        <service android:name="com.andrerinas.openheadunit.aap.AapService" tools:node="remove" />
+        <service android:name="com.andrerinas.openheadunit.location.GpsLocationService" tools:node="remove" />
+        <service android:name="com.andrerinas.openheadunit.aap.DummyVpnService" tools:node="remove" />
+        <activity android:name="com.andrerinas.openheadunit.aap.AapProjectionActivity" tools:node="remove" />
+        <activity android:name="com.andrerinas.openheadunit.app.UsbAttachedActivity" tools:node="remove" />
+        <activity android:name="com.andrerinas.openheadunit.main.MainActivity" tools:node="remove" />
+        <activity android:name="com.andrerinas.openheadunit.main.SettingsActivity" tools:node="remove" />
+        <activity android:name="com.andrerinas.openheadunit.main.OnboardingActivity" tools:node="remove" />
+        <activity android:name="com.andrerinas.openheadunit.main.AutomationActivity" tools:node="remove" />
 
         <!-- Shares Diagnostics' connection log (cache/shared only); independent of the engines' providers. -->
         <provider

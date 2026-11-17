@@ -114,7 +114,7 @@ object EngineChrome {
         MenuItem.SAFE_AREA, MenuItem.HOME,
     )
 
-    fun install(context: Context) {
+    fun install(context: Context, androidAuto: Boolean = true) {
         val app = context.applicationContext
         CarPlayHostIntegration.palette = { night -> if (night) carPlayDark else carPlayLight }
         CarPlayHostIntegration.menuItems = carPlayMenu
@@ -128,8 +128,10 @@ object EngineChrome {
             }
         }
         // Android Auto's Quick Settings is DiAuto's own settings screen; CarLink Settings owns them.
-        HostIntegration.exitMenuHomeLabel = app.getString(R.string.carlink_engine_open_carlink)
-        HostIntegration.chromeStyler = { root, chrome -> styleAndroidAuto(root, chrome, tokens(night = true)) }
+        if (androidAuto) {
+            HostIntegration.exitMenuHomeLabel = app.getString(R.string.carlink_engine_open_carlink)
+            HostIntegration.chromeStyler = { root, chrome -> styleAndroidAuto(root, chrome, tokens(night = true)) }
+        }
     }
 
     // ---------------------------------------------------------------- tokens

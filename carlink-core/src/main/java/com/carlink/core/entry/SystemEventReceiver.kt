@@ -47,6 +47,7 @@ class SystemEventReceiver : BroadcastReceiver() {
 
     @SuppressLint("MissingPermission") // Checked in hasBluetoothPermission().
     private fun onPhoneLink(context: Context, intent: Intent, sdpDone: Boolean) {
+        if (!CarLinkCore.connectionPolicy.wireless) return
         val preferences = CarLinkPreferences(context)
         if (!preferences.autoConnectBluetooth) return
         if (preferences.autoConnectPaused) {

@@ -31,7 +31,7 @@ object Connection {
     fun get(context: Context): SessionManager = instance ?: synchronized(this) {
         instance ?: create(context.applicationContext).also {
             instance = it
-            watchRadios(context.applicationContext, it)
+            if (CarLinkCore.connectionPolicy.wireless) watchRadios(context.applicationContext, it)
         }
     }
 
@@ -73,6 +73,7 @@ object Connection {
      * Skipped on a memory-tight unit that knows no Android phone ([EnginePrewarmPolicy]).
      */
     fun prewarm(context: Context) {
+        if (!CarLinkCore.connectionPolicy.androidAuto) return
         val app = context.applicationContext
         // App start and Home's resume both ask within milliseconds of each other on a cold start.
         if (!prewarming.compareAndSet(false, true)) return
@@ -107,6 +108,11 @@ object Connection {
     @android.annotation.SuppressLint("MissingPermission") // The name is read only when the permission allows.
     fun onHomeShown(context: Context) {
         val app = context.applicationContext
+        if (!CarLinkCore.connectionPolicy.wireless) {
+            // Scan a cable already attached when the screen wakes; never inspect Bluetooth.
+            com.carlink.core.entry.UsbWatcher.get(app).start()
+            return
+        }
         // Before the stereo-Bluetooth probe finishes, a module stereo looks "wireless unavailable"
         // and the first start of the drive was dropped: decide once the probe is in (≤ ~0.5 s).
         if (com.carlink.core.detect.ExternalBluetoothProbe.cached() == null) {
@@ -172,12 +178,13 @@ object Connection {
 
     private fun create(app: Context): SessionManager {
         val unified = UnifiedSettingsStore(app)
-        val adapters = mapOf(
-            Engine.CARPLAY to CarPlayAdapter(app),
-            Engine.ANDROID_AUTO to AndroidAutoAdapter(app) { vehicleProfile(app) },
-        )
-        val environment = DeviceEnvironment(app) { request, path -> enginePreflight(app, unified.load(), request, path) }
-        com.carlink.core.detect.PairingLoss.watch(app)
+        val policy = CarLinkCore.connectionPolicy
+        val adapters = buildMap<Engine, EngineAdapter> {
+            put(Engine.CARPLAY, CarPlayAdapter(app))
+            if (policy.androidAuto) put(Engine.ANDROID_AUTO, AndroidAutoAdapter(app) { vehicleProfile(app) })
+        }
+        val environment = DeviceEnvironment(app, connectionPolicy = policy) { request, path -> enginePreflight(app, unified.load(), request, path) }
+        if (policy.wireless) com.carlink.core.detect.PairingLoss.watch(app)
         return SessionManager(
             adapters = adapters,
             environment = environment,
@@ -185,6 +192,7 @@ object Connection {
             worker = Executors.newSingleThreadExecutor { Thread(it, "carlink-session") },
             main = Handler(Looper.getMainLooper()),
             profiles = ConnectionProfiles.sharedPreferences(app),
+            connectionPolicy = policy,
         )
     }
 
@@ -215,7 +223,8 @@ object Connection {
 
     private fun writeSession(app: Context, plan: SessionPlan) {
         val stored = UnifiedSettingsStore(app).load()
-        val wifi = WifiEnvironmentReader.read(app, stored)
+        val wifi = if (plan.transport == com.carlink.core.core.Transport.USB) WifiEnvironment(0, null, null)
+            else WifiEnvironmentReader.read(app, stored)
         val settings = effectiveSettings(stored, wifi)
         val profile = vehicleProfile(app)
         val picture = automaticPicture(app, settings)
@@ -223,9 +232,10 @@ object Connection {
             Engine.CARPLAY -> {
                 // CarLink: wireless CarPlay's iAP2 link through the stereo's module (opt-in).
                 val route = com.shilapi.xcertplay.transport.ModuleIap2Route
-                val kind = DeviceEnvironment.moduleCarPlayKind(DeviceEnvironment.effectiveStereo(app),
-                    com.carlink.core.settings.CarLinkPreferences(app).wirelessOnExternalBluetooth)
-                    .takeIf { plan.transport == com.carlink.core.core.Transport.WIRELESS }
+                val kind = if (plan.transport == com.carlink.core.core.Transport.WIRELESS) {
+                    DeviceEnvironment.moduleCarPlayKind(DeviceEnvironment.effectiveStereo(app),
+                        com.carlink.core.settings.CarLinkPreferences(app).wirelessOnExternalBluetooth)
+                } else null
                 route.enabled = kind != null
                 kind?.let { route.kind = it }
                 // FYT's own Car Link app reads the same port; two readers split the iPhone's bytes.

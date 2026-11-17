@@ -1,5 +1,8 @@
 # CarLink
 
+For this personal USB-only F-150 fork, follow [AGENTS.md](AGENTS.md). The generic architecture
+and original maintainer's environment described below are upstream context.
+
 One Android app for car head units and tablets: an iPhone gets CarPlay (DiPlay engine,
 `vendor/diplay`), an Android phone gets Android Auto (DiAuto engine, `vendor/diauto`, `:aa`
 process), over USB or wirelessly.

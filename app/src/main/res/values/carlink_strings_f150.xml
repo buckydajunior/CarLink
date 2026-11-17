@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="carlink_f150_vehicle">2018 F-150 Lariat</string>
+    <string name="carlink_f150_settings">Settings</string>
+    <string name="carlink_f150_ready">Plug in your iPhone</string>
+    <string name="carlink_f150_ready_body">Connect your iPhone to the Linkswell USB data port. CarPlay opens automatically.</string>
+    <string name="carlink_f150_access_title">Allow microphone access</string>
+    <string name="carlink_f150_access_body">Allow the microphone for Siri and calls. Android may also ask once to allow the wired CarPlay connection.</string>
+    <string name="carlink_f150_connecting">Opening CarPlay</string>
+    <string name="carlink_f150_connecting_body">Keep your iPhone plugged in. Unlock it and accept the CarPlay prompt if asked.</string>
+    <string name="carlink_f150_connected">CarPlay is connected</string>
+    <string name="carlink_f150_connected_body">Your iPhone is connected by USB.</string>
+    <string name="carlink_f150_failed">CarPlay needs attention</string>
+    <string name="carlink_f150_failed_body">Unlock your iPhone, check its CarPlay prompt, then try again. If needed, reconnect the USB cable or try another data cable.</string>
+    <string name="carlink_f150_auth_missing">This build is missing the CarPlay authentication files. They must be included in a local build before CarPlay can connect.</string>
+    <string name="carlink_f150_allow">Allow access</string>
+    <string name="carlink_f150_open">Open CarPlay</string>
+    <string name="carlink_f150_connect">Connect CarPlay</string>
+    <string name="carlink_f150_retry">Try again</string>
+    <string name="carlink_f150_disconnect">Disconnect</string>
+    <string name="carlink_f150_back">Back</string>
+    <string name="carlink_f150_icon_size">CarPlay icon size</string>
+    <string name="carlink_f150_size_body">Enlarges the apps, text and dock inside CarPlay. Extra large is the starting size for this truck. After changing it, unplug and reconnect your iPhone to apply it. Larger sizes show less content.</string>
+    <string name="carlink_f150_size_standard">Standard</string>
+    <string name="carlink_f150_size_large">Large</string>
+    <string name="carlink_f150_size_xl">Extra large</string>
+    <string name="carlink_f150_size_xxl">Extra extra large</string>
+    <string name="carlink_f150_size_max">Largest</string>
+    <string name="carlink_f150_about">About and open-source licenses</string>
+    <string name="carlink_f150_share_log">Share connection log</string>
+</resources>

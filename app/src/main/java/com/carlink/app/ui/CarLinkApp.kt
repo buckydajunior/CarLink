@@ -22,8 +22,6 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import com.carlink.app.ui.about.AboutScreen
 import com.carlink.app.ui.diagnostics.DiagnosticsScreen
-import com.carlink.app.ui.home.HomeScreen
-import com.carlink.app.ui.settings.SettingsScreen
 import com.carlink.app.ui.theme.CarMotion
 import com.carlink.app.ui.theme.LocalReduceMotion
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -45,9 +43,8 @@ internal fun backReturnsToProjection(route: Route, fromCar: Boolean, live: Boole
 
 @Composable
 fun CarLinkApp(vm: CarLinkViewModel, onExitToCarHome: () -> Unit) {
-    // Back stack of routes; Home is always at the bottom. The first-time setup runs over Home at
-    // the first launch (and when the driver asks); Home still asks for permissions inline.
-    var stack by rememberSaveable { mutableStateOf(if (vm.setupNeeded()) listOf(Route.HOME, Route.SETUP) else listOf(Route.HOME)) }
+    // Go straight to USB readiness; required system consent is requested inline.
+    var stack by rememberSaveable { mutableStateOf(listOf(Route.HOME)) }
     // The Settings category another screen asked to open (Diagnostics), or null for the default.
     var settingsStart by rememberSaveable { mutableStateOf<SettingsCategory?>(null) }
     val route = stack.last()
@@ -99,14 +96,11 @@ fun CarLinkApp(vm: CarLinkViewModel, onExitToCarHome: () -> Unit) {
                 label = "route",
             ) { current ->
                 when (current) {
-                    Route.HOME -> HomeScreen(vm, navigate = navigate)
-                    Route.SETTINGS -> SettingsScreen(vm, onBack = back, navigate = navigate, startCategory = settingsStart)
+                    Route.HOME -> com.carlink.app.ui.wired.WiredHomeScreen(vm, navigate = navigate)
+                    Route.SETTINGS -> com.carlink.app.ui.wired.WiredSettingsScreen(vm, onBack = back, onAbout = { navigate(Route.ABOUT) })
                     Route.DIAGNOSTICS -> DiagnosticsScreen(vm, onBack = back, openSettings = openSettings)
                     Route.ABOUT -> AboutScreen(onBack = back)
-                    Route.SETUP, Route.SETUP_PAIR -> com.carlink.app.ui.setup.SetupScreen(vm,
-                        start = if (current == Route.SETUP_PAIR) com.carlink.app.ui.setup.SetupStep.PAIR
-                            else com.carlink.app.ui.setup.SetupStep.WELCOME,
-                        onExit = { stack = listOf(Route.HOME) })
+                    Route.SETUP, Route.SETUP_PAIR -> com.carlink.app.ui.wired.WiredHomeScreen(vm, navigate = navigate)
                 }
             }
         }
