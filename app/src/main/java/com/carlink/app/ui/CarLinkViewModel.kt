@@ -24,6 +24,9 @@ import com.carlink.core.core.LinkState
 import com.carlink.core.entry.UsbWatcher
 import com.carlink.core.settings.InterfaceSize
 import com.carlink.core.settings.UnifiedSettingsStore
+import com.carlink.core.settings.SystemBarPreferences
+import com.carlink.core.audio.EqualizerController
+import com.carlink.core.audio.EqualizerSettings
 import com.shilapi.xcertplay.AirPlayPersistence
 import com.shilapi.xcertplay.CarPlayHostActivity
 import com.shilapi.xcertplay.airplay.AirPlayPhysicalSizeBasis
@@ -48,16 +51,19 @@ data class DisplayPrefs(
 
 data class HomeState(val link: LinkState, val usbAttached: Boolean)
 
-/** Only the USB status, projected size and log export needed by this truck's three screens. */
+/** USB status and the small set of preferences exposed by this truck's receiver. */
 class CarLinkViewModel(application: Application) : AndroidViewModel(application) {
     private val app = application
     private val session = Connection.get(app)
     private val uiPreferences = UiPreferences(app)
     private val store = UnifiedSettingsStore(app)
+    private val bars = SystemBarPreferences(app)
     private val _usbAttached = MutableStateFlow(UsbWatcher.get(app).hasIphone())
     private val _permissionsNeeded = MutableStateFlow(missingPermissions().isNotEmpty())
     private val _carPlayWidth = MutableStateFlow(AirPlayPersistence.loadWidthPhysicalMm(app))
     private val _settingsRequests = MutableStateFlow(0L)
+    private val _systemBars = MutableStateFlow(bars.load())
+    private val _equalizer = MutableStateFlow(EqualizerController.loadSettings(app))
 
     val display: StateFlow<DisplayPrefs> = MutableStateFlow(DisplayPrefs(
         uiPreferences.themeMode, uiPreferences.uiProfileMode, uiPreferences.interfaceScale,
@@ -70,6 +76,8 @@ class CarLinkViewModel(application: Application) : AndroidViewModel(application)
     val permissionsNeeded: StateFlow<Boolean> = _permissionsNeeded.asStateFlow()
     val carPlayWidth: StateFlow<Int> = _carPlayWidth.asStateFlow()
     val settingsRequests: StateFlow<Long> = _settingsRequests.asStateFlow()
+    val systemBars = _systemBars.asStateFlow()
+    val equalizer = _equalizer.asStateFlow()
 
     private val usbReceiver = object : android.content.BroadcastReceiver() {
         override fun onReceive(context: android.content.Context, intent: Intent) {
@@ -101,6 +109,8 @@ class CarLinkViewModel(application: Application) : AndroidViewModel(application)
         _usbAttached.value = UsbWatcher.get(app).hasIphone()
         _permissionsNeeded.value = missingPermissions().isNotEmpty()
         _carPlayWidth.value = AirPlayPersistence.loadWidthPhysicalMm(app)
+        _systemBars.value = bars.load()
+        _equalizer.value = EqualizerController.loadSettings(app)
     }
 
     fun missingPermissions(): List<String> = DevicePreflight.requiredPermissions()
@@ -118,6 +128,31 @@ class CarLinkViewModel(application: Application) : AndroidViewModel(application)
         AirPlayPersistence.saveWidthPhysicalMm(app, width)
         _carPlayWidth.value = width
         store.save(store.load().copy(interfaceSize = InterfaceSize.CUSTOM))
+    }
+
+    fun showStatusBar(visible: Boolean) {
+        bars.showStatusBar(visible)
+        _systemBars.value = bars.load()
+    }
+
+    fun showBottomBar(visible: Boolean) {
+        bars.showBottomBar(visible)
+        _systemBars.value = bars.load()
+    }
+
+    fun setEqualizerEnabled(enabled: Boolean) = saveEqualizer(_equalizer.value.copy(enabled = enabled))
+
+    fun setEqualizerBand(index: Int, gain: Float) {
+        if (index !in EqualizerController.frequenciesHz.indices) return
+        saveEqualizer(_equalizer.value.copy(bandGainsDb = _equalizer.value.bandGainsDb.mapIndexed { band, old ->
+            if (band == index) gain else old
+        }))
+    }
+
+    fun resetEqualizer() { _equalizer.value = EqualizerController.reset(app) }
+
+    private fun saveEqualizer(settings: EqualizerSettings) {
+        _equalizer.value = EqualizerController.saveSettings(app, settings)
     }
 
     fun shareWiredLog() {

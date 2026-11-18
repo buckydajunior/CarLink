@@ -4,9 +4,26 @@ A dedicated **USB CarPlay receiver** for a **2018 Ford F-150 Lariat with a Links
 forked from [CarLink](https://github.com/F-e-n-y-x/CarLink).
 
 Plug an iPhone into the Linkswell USB data port. The app connects automatically, with no welcome
-wizard, wireless setup or phone switching. Settings has larger projected CarPlay icon presets,
-a connection-log export, source credits and complete licenses. Extra large is the default;
-unplug and reconnect after changing size. Video resolution stays unchanged.
+wizard, wireless setup or phone switching. Home and the USB connection screen share a large local
+clock, date and live connection status. The clock follows the tablet's 12/24-hour setting, updates
+once per minute and never delays automatic projection. There is no logo or animated loading loop.
+The app has one launcher icon and one visible recent-apps card. Projection keeps its own hidden
+task so opening Settings preserves the running phone connection; Open CarPlay returns to it.
+
+Settings has independent tablet status-bar and bottom-bar/dock switches (either, both or neither),
+a five-band music equalizer, larger projected CarPlay icon presets, connection-log export, source
+credits and complete licenses. Bar changes apply on return to CarPlay using the engine's existing
+inset handling and may briefly reconnect it; the bottom bar is Android's navigation/taskbar, subject
+to the Linkswell firmware.
+Extra large is the default projected size; unplug and reconnect after changing it. Video resolution
+stays unchanged.
+
+The optional equalizer affects decoded CarPlay music/media only. Navigation prompts, Siri, phone
+calls and microphone audio bypass it. Five bands at 60/230/910/3600/14000 Hz offer ±12 dB in 1 dB
+steps. It starts Off and flat, applies adjustments when a slider is released, and keeps its enabled
+state when Reset to flat is pressed. Each audio renderer has independent filter history, with
+short crossfades on changes and automatic headroom for boosts. Stable Off/flat leaves PCM bytes
+unchanged. Unsupported formats bypass it; no global/system equalizer or new audio buffers are used.
 
 ## Removed
 
@@ -28,7 +45,8 @@ If Android asks which app should handle USB, select **F-150 CarPlay**. Its packa
 `com.buckydajunior.carlink.f150` is separate from upstream CarLink; run one projection app at a time.
 
 Test cold startup, quick replug, phone left connected across ignition, Siri/calls/music,
-steering-wheel controls, reverse-camera return and icon sizes. **These have not yet been verified
+steering-wheel controls, reverse-camera return, icon sizes, all four bar combinations and EQ
+on/off/music balance while navigation or calls play. **These have not yet been verified
 on this user's Linkswell.** Settings > Share connection log exports `WIRED_TIMING` and app events
 for measuring plug-to-first-frame latency. No on-car speed is claimed from unit tests.
 

@@ -5,6 +5,7 @@ import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.view.View
+import com.carlink.core.audio.EqualizerController
 import com.carlink.core.diagnostics.EventLog
 import com.carlink.core.entry.UsbWatcher
 import com.shilapi.xcertplay.AirPlayPersistence
@@ -38,6 +39,7 @@ object CarLinkCore {
             AirPlayPersistence.saveOemLabel(app, config.accessoryName)
         }
         CarPlayAdapter.install(app)
+        EqualizerController.install(app)
         CarPlayWaitingView.register(config.waitingView)
         UsbWatcher.get(app).start()
         app.registerComponentCallbacks(object : android.content.ComponentCallbacks2 {

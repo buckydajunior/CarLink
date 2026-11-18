@@ -1850,6 +1850,8 @@ private class AudioRenderer(
     @Volatile private var navigationAttenuationDb = 0
     private var appliedNavigationAttenuationDb: Int? = null
     private var levelChannel = "" // CarLink: HostAudio.playbackPcm
+    private var playbackProcessor: HostAudio.PcmProcessor? = null // CarLink: per-renderer music DSP
+    private var playbackProcessorFormat: HostAudio.PlaybackPcmFormat? = null // CarLink
     private var pcm = ByteArray(64 * 1024)
     private var playbackStarted = false
     private var prebufferBytes = 0
@@ -2092,6 +2094,7 @@ private class AudioRenderer(
         }
         val selection = mappedSelection()
         mappedChannel = selection.channel
+        updatePlaybackProcessor(format.sampleRate, format.channels, encoding) // CarLink
         val streamOverride = channelOverride(selection.channel)
         actualLegacyStreamType = streamOverride.takeIf { it != 0 }
         var attributes = audioAttributesFor(selection, streamOverride)
@@ -2238,6 +2241,16 @@ private class AudioRenderer(
         )
         levelChannel = selection.channel.name // CarLink: the level follows the stream's own kind
         return if (speakerphoneCall || HostAudio.callsAsMedia) AudioChannelMapper.playCallOnSpeaker(selection) else selection // CarLink: callsAsMedia
+    }
+
+    // CarLink: leave playback unchanged when decoder metadata disagrees with the configured track.
+    private fun updatePlaybackProcessor(sampleRate: Int, channels: Int, encoding: Int) {
+        val next = if (sampleRate == format.sampleRate && channels == format.channels) {
+            HostAudio.PlaybackPcmFormat(levelChannel, format.audioType, sampleRate, channels, encoding)
+        } else null
+        if (next == playbackProcessorFormat) return // Keep filter history on identical codec notices.
+        playbackProcessorFormat = next
+        playbackProcessor = next?.let { HostAudio.playbackProcessorFactory?.invoke(it) }
     }
 
     private fun audioAttributesFor(selection: AudioChannelSelection): AudioAttributes =
@@ -2440,12 +2453,19 @@ private class AudioRenderer(
                 index == MediaCodec.INFO_TRY_AGAIN_LATER -> return
                 index == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
                     // Vendor metadata inspection must not interrupt otherwise working playback.
-                    if (decoderOutputReports < 4) runCatching {
+                    runCatching {
                         val outputFormat = codec.outputFormat
+                        // CarLink: PCM16 is the track's default; an explicit unsupported encoding
+                        // or a changed rate/channel layout must bypass host DSP, without rerouting.
+                        updatePlaybackProcessor(
+                            outputFormat.intOrNull(MediaFormat.KEY_SAMPLE_RATE) ?: format.sampleRate,
+                            outputFormat.intOrNull(MediaFormat.KEY_CHANNEL_COUNT) ?: format.channels,
+                            outputFormat.intOrNull(MediaFormat.KEY_PCM_ENCODING) ?: AndroidAudioFormat.ENCODING_PCM_16BIT,
+                        )
                         val metadata = "rate=${outputFormat.intOrNull(MediaFormat.KEY_SAMPLE_RATE)} " +
                             "channels=${outputFormat.intOrNull(MediaFormat.KEY_CHANNEL_COUNT)} " +
                             "pcmEncoding=${outputFormat.intOrNull(MediaFormat.KEY_PCM_ENCODING)}"
-                        if (metadata != lastDecoderOutputMetadata) {
+                        if (decoderOutputReports < 4 && metadata != lastDecoderOutputMetadata) {
                             lastDecoderOutputMetadata = metadata
                             decoderOutputReports++
                             report("Audio: decoded format audioType=${format.audioType} codec=${format.codec} $metadata")
@@ -2515,6 +2535,7 @@ private class AudioRenderer(
         applyNavigationAttenuation()
         attenuateNavigation(data, offset, length)
         HostAudio.playbackPcm?.invoke(levelChannel, data, offset, length) // CarLink
+        playbackProcessor?.process(data, offset, length) // CarLink: music only; never microphone PCM
         if (!fadeApplied) {
             applyFadeIn(data, offset, length)
             fadeApplied = true

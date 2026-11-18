@@ -2,8 +2,10 @@
 <resources>
     <!-- Android still draws a launch window; omit its logo and show the app immediately. -->
     <style name="Theme.CarLink.Starting" parent="Theme.CarLink">
+        <item name="android:windowBackground">@color/carlink_idle_background</item>
+        <item name="android:windowLightStatusBar">false</item>
         <item name="android:windowSplashScreenAnimatedIcon">@drawable/carlink_empty_splash</item>
         <item name="android:windowSplashScreenAnimationDuration">0</item>
-        <item name="android:windowSplashScreenBackground">@color/carlink_window_background</item>
+        <item name="android:windowSplashScreenBackground">@color/carlink_idle_background</item>
     </style>
 </resources>

@@ -49,6 +49,8 @@
         <!-- Standalone engine tools/widgets are not entry points in the dedicated receiver. -->
         <activity android:name="com.shilapi.xcertplay.DiPlayActivity" tools:node="remove" />
         <activity android:name="com.shilapi.xcertplay.MainActivity" tools:node="remove" />
+        <!-- Keep projection alive beside Settings, with one visible app card in Recents. -->
+        <activity android:name="com.shilapi.xcertplay.CarPlayHostActivity" android:excludeFromRecents="true" />
         <activity android:name="com.shilapi.xcertplay.AdbClusterActivity" tools:node="remove" />
         <receiver android:name="com.shilapi.xcertplay.NavigationWidget" tools:node="remove" />
         <provider android:name="com.shilapi.xcertplay.update.UpdateApkProvider" tools:node="remove" />

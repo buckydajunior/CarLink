@@ -1,8 +1,28 @@
-> **F-150 fork, version 1.1.0:** the current product has `:app` (three screens, log export),
-> `:carlink-core` (one USB CarPlay session, USB routing/wake/reset, display policy and timing history),
+> **F-150 fork, version 1.2.0:** the current product has `:app` (clock/status, settings, music EQ,
+> About and log export), `:carlink-core` (one USB CarPlay session, USB routing/wake/reset,
+> display policy, per-renderer music PCM equalization and timing history),
 > and DiPlay's `:carplay-common` / `:carplay-shared` engine. Android Auto and the generic wireless,
 > setup, updater and switcher layers described below were removed. See the root README and AGENTS.md
 > for the active build and device-test workflow. The remainder is retained as upstream history.
+
+The current Home and engine waiting surface both use `IdleClockView`: native `TextClock` widgets
+for local time/date, static background, live session status and recovery actions. Native clock
+updates are attached to the view lifecycle; authentication does not wait for Compose or a timer.
+`IdleConnectionUi` maps actual session states to waiting/connecting/connected/attention, preserving
+permission, VPN and missing-auth recovery. Android's mandatory launch window stays blank and brief.
+`SystemBarPreferences` writes DiPlay's original hide-top/hide-bottom keys independently; the host
+re-reads them and applies its existing window-inset logic on resume.
+Projection retains the separate `.carplay` task but is excluded from Recents by the app manifest.
+Home supplies the visible app card. Keeping separate affinities prevents Home's `singleTask`
+settings launch from clearing/destroying the projection activity above it in a shared task.
+
+`audio/EqualizerController` publishes normalized immutable settings. The optional
+`HostAudio.playbackProcessorFactory` receives original type/channel, sample rate, channel count
+and PCM encoding; only raw `media` + `MEDIA` PCM16 mono/stereo creates `Pcm16Equalizer`. Calls routed
+as media, navigation, Siri and microphone remain outside the DSP path. Each renderer owns filter
+history. Steady Off/flat is an O(1) byte-exact bypass; active processing uses five peaking biquads,
+20 ms bank crossfades and headroom/saturation. It does not change AudioTrack sizing, routing or
+USB startup. DSP/routing tests cannot verify a Linkswell's acoustic output or CPU/connection time.
 
 # CarLink architecture
 

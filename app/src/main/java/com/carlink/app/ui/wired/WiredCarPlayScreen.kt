@@ -1,45 +1,34 @@
 package com.carlink.app.ui.wired
 
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawing
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
+import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.semantics.Role
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.carlink.app.F150Profile
 import com.carlink.app.R
 import com.carlink.app.ui.CarLinkViewModel
 import com.carlink.app.ui.Route
+import com.carlink.app.ui.home.IdleClockView
+import com.carlink.app.ui.home.IdleConnectionUi
+import com.carlink.app.ui.home.IdleAction
 import com.carlink.app.ui.theme.CarLinkTokens
 import com.carlink.core.core.LinkProblem
-import com.carlink.core.core.LinkStage
 import com.carlink.core.core.LinkState
+import com.carlink.core.settings.SystemBarVisibility
 
-/** The USB-only product surface: no pairing, network picker, phone list or setup wizard. */
+/** The same clock surface is used by Home and the engine during USB authentication. */
 @Composable
 fun WiredHomeScreen(vm: CarLinkViewModel, navigate: (Route) -> Unit) {
     val home by vm.home.collectAsStateWithLifecycle()
@@ -70,91 +59,86 @@ fun WiredHomeContent(
     onOpen: () -> Unit = {},
     onFix: () -> Unit = {},
 ) {
-    val connecting = link.stage == LinkStage.CONNECTING || link.stage == LinkStage.WAITING
-    val title = when {
-        needsPermissions -> R.string.carlink_f150_access_title
-        link.stage == LinkStage.CONNECTED -> R.string.carlink_f150_connected
-        connecting -> R.string.carlink_f150_connecting
-        link.stage == LinkStage.FAILED -> R.string.carlink_f150_failed
-        else -> R.string.carlink_f150_ready
-    }
-    val body = when {
-        needsPermissions || link.problem == LinkProblem.PERMISSIONS -> R.string.carlink_f150_access_body
-        link.problem == LinkProblem.CARPLAY_AUTH_MISSING -> R.string.carlink_f150_auth_missing
-        link.problem == LinkProblem.VPN_CONSENT -> R.string.carlink_f150_vpn_body
-        link.stage == LinkStage.CONNECTED -> R.string.carlink_f150_connected_body
-        connecting -> R.string.carlink_f150_connecting_body
-        link.stage == LinkStage.FAILED -> R.string.carlink_f150_failed_body
-        else -> R.string.carlink_f150_ready_body
-    }
-    val fixable = needsPermissions || link.problem == LinkProblem.PERMISSIONS || link.problem == LinkProblem.VPN_CONSENT
-    WiredPage {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            Text(stringResource(R.string.carlink_f150_vehicle), Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
-            OutlinedButton(onSettings, Modifier.heightIn(min = CarLinkTokens.dimens.minTouch)) {
-                Icon(painterResource(R.drawable.carlink_ic_settings), null, Modifier.size(32.dp))
-                Text(stringResource(R.string.carlink_f150_settings), Modifier.padding(start = 12.dp))
-            }
-        }
-        Spacer(Modifier.height(32.dp))
-        Card(Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(28.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
-                Icon(painterResource(R.drawable.carlink_ic_usb), null, Modifier.size(72.dp),
-                    tint = MaterialTheme.colorScheme.primary)
-                Text(stringResource(title), style = MaterialTheme.typography.headlineLarge)
-                Text(stringResource(body), style = MaterialTheme.typography.bodyLarge)
-                when {
-                    fixable -> WiredButton(stringResource(R.string.carlink_f150_allow), onFix)
-                    link.stage == LinkStage.CONNECTED -> WiredButton(stringResource(R.string.carlink_f150_open), onOpen)
-                    link.stage == LinkStage.FAILED && link.problem != LinkProblem.CARPLAY_AUTH_MISSING ->
-                        WiredButton(stringResource(R.string.carlink_f150_retry), onRetry)
-                    !connecting && usbAttached -> WiredButton(stringResource(R.string.carlink_f150_connect), onConnect)
-                }
-                if (connecting || link.stage == LinkStage.CONNECTED) {
-                    OutlinedButton(onDisconnect, Modifier.fillMaxWidth().heightIn(min = CarLinkTokens.dimens.minTouch)) {
-                        Text(stringResource(R.string.carlink_f150_disconnect))
+    Surface(Modifier.fillMaxSize(), color = Color(0xFF0B111A)) {
+        AndroidView(
+            factory = { IdleClockView(it) },
+            modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing),
+            update = { view ->
+                view.bind(IdleConnectionUi.from(link, needsPermissions, usbAttached), onSettings) { action ->
+                    when (action) {
+                        IdleAction.ALLOW -> onFix()
+                        IdleAction.CONNECT -> onConnect()
+                        IdleAction.RETRY -> onRetry()
+                        IdleAction.OPEN -> onOpen()
+                        IdleAction.DISCONNECT -> onDisconnect()
                     }
                 }
-            }
-        }
+            },
+        )
     }
 }
 
 @Composable
-fun WiredSettingsScreen(vm: CarLinkViewModel, onBack: () -> Unit, onAbout: () -> Unit) {
+fun WiredSettingsScreen(vm: CarLinkViewModel, onBack: () -> Unit, onAbout: () -> Unit, onEqualizer: () -> Unit) {
     val width by vm.carPlayWidth.collectAsStateWithLifecycle()
-    WiredSettingsContent(width, vm::setCarPlayWidth, onBack, onAbout, vm::shareWiredLog)
+    val bars by vm.systemBars.collectAsStateWithLifecycle()
+    val equalizer by vm.equalizer.collectAsStateWithLifecycle()
+    WiredSettingsContent(width, vm::setCarPlayWidth, onBack, onAbout, vm::shareWiredLog,
+        bars, vm::showStatusBar, vm::showBottomBar, equalizer.enabled, onEqualizer)
 }
 
 @Composable
-fun WiredSettingsContent(width: Int, onSize: (Int) -> Unit = {}, onBack: () -> Unit = {},
-    onAbout: () -> Unit = {}, onShareLog: () -> Unit = {}) {
+fun WiredSettingsContent(
+    width: Int,
+    onSize: (Int) -> Unit = {},
+    onBack: () -> Unit = {},
+    onAbout: () -> Unit = {},
+    onShareLog: () -> Unit = {},
+    bars: SystemBarVisibility = SystemBarVisibility(),
+    onStatusBar: (Boolean) -> Unit = {},
+    onBottomBar: (Boolean) -> Unit = {},
+    equalizerEnabled: Boolean = false,
+    onEqualizer: () -> Unit = {},
+) {
     val labels = listOf(
         R.string.carlink_f150_size_standard, R.string.carlink_f150_size_large,
         R.string.carlink_f150_size_xl, R.string.carlink_f150_size_xxl, R.string.carlink_f150_size_max,
     )
     WiredPage {
-        OutlinedButton(onBack, Modifier.heightIn(min = CarLinkTokens.dimens.minTouch)) {
-            Icon(painterResource(R.drawable.carlink_ic_arrow_back), null, Modifier.size(32.dp))
-            Text(stringResource(R.string.carlink_f150_back), Modifier.padding(start = 12.dp))
+        WiredBackButton(onBack)
+        Spacer(Modifier.height(24.dp))
+        Text(stringResource(R.string.carlink_f150_tablet_bars), style = MaterialTheme.typography.headlineMedium)
+        Text(stringResource(R.string.carlink_f150_bars_body), Modifier.padding(vertical = 16.dp),
+            style = MaterialTheme.typography.bodyLarge)
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(horizontal = 20.dp)) {
+                PreferenceSwitch(stringResource(R.string.carlink_f150_status_bar), bars.statusBar, onStatusBar)
+                HorizontalDivider()
+                PreferenceSwitch(stringResource(R.string.carlink_f150_bottom_bar), bars.bottomBar, onBottomBar)
+            }
         }
         Spacer(Modifier.height(24.dp))
+        OutlinedButton(onEqualizer, Modifier.fillMaxWidth().heightIn(min = CarLinkTokens.dimens.minTouch)) {
+            Text(stringResource(R.string.carlink_f150_equalizer), Modifier.weight(1f))
+            Text(stringResource(if (equalizerEnabled) R.string.carlink_f150_on else R.string.carlink_f150_off))
+        }
+        Spacer(Modifier.height(32.dp))
         Text(stringResource(R.string.carlink_f150_icon_size), style = MaterialTheme.typography.headlineMedium)
-        Text(stringResource(R.string.carlink_f150_size_body), Modifier.padding(vertical = 20.dp),
+        Text(stringResource(R.string.carlink_f150_size_body), Modifier.padding(vertical = 16.dp),
             style = MaterialTheme.typography.bodyLarge)
-        F150Profile.carPlayWidths.forEachIndexed { index, value ->
-            val label = stringResource(labels[index])
-            if (width == value) {
-                WiredButton(label, { onSize(value) })
-            } else {
-                OutlinedButton({ onSize(value) }, Modifier.fillMaxWidth().heightIn(min = CarLinkTokens.dimens.minTouch)) {
-                    Text(label)
+        F150Profile.carPlayWidths.toList().chunked(2).forEach { widths ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                widths.forEach { value ->
+                    val label = stringResource(labels[F150Profile.carPlayWidths.indexOf(value)])
+                    val modifier = Modifier.weight(1f).heightIn(min = CarLinkTokens.dimens.minTouch)
+                    if (width == value) Button({ onSize(value) }, modifier) { Text(label) }
+                    else OutlinedButton({ onSize(value) }, modifier) { Text(label) }
                 }
+                if (widths.size == 1) Spacer(Modifier.weight(1f))
             }
             Spacer(Modifier.height(12.dp))
         }
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(16.dp))
         OutlinedButton(onShareLog, Modifier.fillMaxWidth().heightIn(min = CarLinkTokens.dimens.minTouch)) {
             Text(stringResource(R.string.carlink_f150_share_log))
         }
@@ -166,15 +150,28 @@ fun WiredSettingsContent(width: Int, onSize: (Int) -> Unit = {}, onBack: () -> U
 }
 
 @Composable
-private fun WiredPage(content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {
+internal fun PreferenceSwitch(label: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    Row(Modifier.fillMaxWidth().heightIn(min = CarLinkTokens.dimens.minTouch)
+        .toggleable(checked, role = Role.Switch, onValueChange = onCheckedChange),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+        Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+        Switch(checked, onCheckedChange = null)
+    }
+}
+
+@Composable
+internal fun WiredBackButton(onBack: () -> Unit) {
+    OutlinedButton(onBack, Modifier.heightIn(min = CarLinkTokens.dimens.minTouch)) {
+        Icon(painterResource(R.drawable.carlink_ic_arrow_back), null, Modifier.size(28.dp))
+        Text(stringResource(R.string.carlink_f150_back), Modifier.padding(start = 12.dp))
+    }
+}
+
+@Composable
+internal fun WiredPage(content: @Composable ColumnScope.() -> Unit) {
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background,
         contentColor = MaterialTheme.colorScheme.onBackground) {
         Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)
             .verticalScroll(rememberScrollState()).padding(24.dp), content = content)
     }
-}
-
-@Composable
-private fun WiredButton(label: String, onClick: () -> Unit) {
-    Button(onClick, Modifier.fillMaxWidth().heightIn(min = CarLinkTokens.dimens.minTouch)) { Text(label) }
 }

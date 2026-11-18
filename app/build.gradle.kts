@@ -61,7 +61,7 @@ android {
         // Releases: change versionName only. versionCode = major * 10000 + minor * 100 + patch
         // (1.0.0 → 10000, 1.2.3 → 10203), so minor and patch stay below 100. The in-app updater
         // scripts/release.sh relies on it; docs/RELEASING.md.
-        versionName = "1.1.0"
+        versionName = "1.2.0"
         versionCode = carLinkVersionCode(versionName!!)
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
