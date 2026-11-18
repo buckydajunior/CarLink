@@ -28,4 +28,14 @@
     <string name="carlink_f150_size_max">Largest</string>
     <string name="carlink_f150_about">About and open-source licenses</string>
     <string name="carlink_f150_share_log">Share connection log</string>
+    <string name="carlink_f150_version">Version %1$s</string>
+    <string name="carlink_f150_credits">Built from CarLink by F-e-n-y-x and DiPlay by shihabal3amri, based on xcertplay by shilapi. Earlier CarLink work also incorporated DiAuto and Open Headunit. Original licenses and credits are preserved in the source. CarPlay belongs to Apple; this project is independent and uses experimental CarPlay support.</string>
+    <string name="carlink_f150_agpl">GNU AGPL version 3</string>
+    <string name="carlink_f150_gpl">GNU GPL version 3</string>
+    <string name="carlink_f150_source">Source code and credits</string>
+    <string name="carlink_f150_source_url" translatable="false">https://github.com/buckydajunior/CarLink/tree/f150-usb-carplay</string>
+    <string name="carlink_f150_close">Close</string>
+    <string name="carlink_f150_vpn_body">Wired CarPlay uses a private USB connection. Android asks once to allow it.</string>
+    <string name="carlink_f150_ofl">Inter font license</string>
+    <string name="carlink_f150_notices">Component notices</string>
 </resources>

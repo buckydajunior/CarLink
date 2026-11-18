@@ -2,7 +2,7 @@
 # CarLink dev loop: build, test, install and screenshot on an explicit device or emulator.
 #
 #   dev.sh build            debug APK; optional auth from explicit DIPLAY_AUTH_ASSETS_DIR
-#   dev.sh test             all unit-test suites (app, carlink-core, both engines) + resource collision check
+#   dev.sh test             all unit-test suites (app, carlink-core, CarPlay engine) + resource collision check
 #   dev.sh install          install the debug APK on the emulator and launch CarLink
 #   dev.sh shot <name>      screenshot the emulator to /tmp/carlink-shots/<name>.png
 #   dev.sh size <WxH> [dpi] resize the emulator screen (e.g. 1080x2400 420 for a phone; "reset")
@@ -64,8 +64,7 @@ case "$cmd" in
   test)
     cd "$ROOT"
     python3 -I scripts/resource_collisions.py --check
-    ./gradlew --no-daemon -q --continue :app:testDebugUnitTest :carlink-core:testDebugUnitTest :androidauto:testGithubDebugUnitTest \
-      :carplay-shared:testDebugUnitTest :carplay-common:testDebugUnitTest ${gradle_args[@]+"${gradle_args[@]}"} "$@"
+    ./gradlew --no-daemon -q --continue :app:testDebugUnitTest :carlink-core:testDebugUnitTest :carplay-shared:testDebugUnitTest :carplay-common:testDebugUnitTest ${gradle_args[@]+"${gradle_args[@]}"} "$@"
     echo "all tests passed"
     ;;
   build-release)

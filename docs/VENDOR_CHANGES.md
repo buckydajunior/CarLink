@@ -1,3 +1,9 @@
+> **F-150 fork, version 1.1.0:** the entire `vendor/diauto` source tree and its Gradle modules
+> were removed. USB reset recovery now uses a small authorized-descriptor JNI helper in
+> `carlink-core`; no DiAuto/libusb library is linked. The DiAuto rows below record upstream history.
+> This cleanup did not edit DiPlay's shared protocol source. Original credits and AGPL/GPL notices
+> remain in the source and the app's About page.
+
 # Changes to the vendored engines
 
 CarLink imported both engines with `git subtree`, keeping their history:

@@ -49,12 +49,4 @@ class RenderingPolicyTest {
         assertFalse(RenderingPolicy.lite(RenderingMode.FULL, t3))
     }
 
-    @Test fun displayPrefsResolveAutomatic() {
-        val auto = DisplayPrefs(com.carlink.app.ui.theme.ThemeMode.DARK, com.carlink.app.ui.theme.UiProfileMode.AUTO, 1f,
-            RenderingMode.AUTO, autoLite = true)
-        assertTrue(auto.liteRendering)
-        assertFalse(auto.copy(autoLite = false).liteRendering)
-        assertFalse(auto.copy(renderingMode = RenderingMode.FULL).liteRendering)
-        assertEquals(true, auto.copy(renderingMode = RenderingMode.LITE, autoLite = false).liteRendering)
-    }
 }

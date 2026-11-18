@@ -1,151 +1,35 @@
 package com.carlink.core.connection
 
-/**
- * Android Auto's stream resolutions (DiAuto `Settings.Resolution` ids). [stream] is the size the
- * phone sends in each orientation (DiAuto `HeadUnitScreenConfig.protoForResolution`).
- */
-enum class AaResolution(val id: Int, private val landscape: VideoSize, private val portrait: VideoSize, val label: String) {
-    P480(1, VideoSize(800, 480), VideoSize(720, 1280), "480p"),
-    P720(2, VideoSize(1280, 720), VideoSize(720, 1280), "720p"),
-    P1080(3, VideoSize(1920, 1080), VideoSize(1080, 1920), "1080p");
-
-    fun stream(portraitPanel: Boolean): VideoSize = if (portraitPanel) portrait else landscape
-}
-
-/**
- * What "Automatic" picture means on this device, for both engines. Null fields leave the engine's
- * own value (the driver's Advanced choice) alone.
- *
- * @property aaResolutionId DiAuto `resolutionId`; 0 keeps DiAuto's own Automatic (sized to the panel).
- * @property aaCodec DiAuto `video-codec`: "H.264" when the device has no hardware HEVC decoder.
- * @property carPlayScalePercent DiPlay `display_scale_percent`: the CarPlay picture is the panel at this size.
- * @property carPlayHevc DiPlay `hevc_enabled`: false when the device has no hardware HEVC decoder.
- * @property carPlayDirectVideo DiPlay `direct_video_output`: true on slow hardware (a SurfaceView
- *   instead of a TextureView, so no GPU pass per video frame); null leaves the driver's switch alone.
- */
+/** Decoder-guided choices for the projected CarPlay picture, independent of app UI density. */
 data class PictureChoice(
-    val aaResolutionId: Int,
-    val aaFps: Int,
-    val aaCodec: String?,
     val carPlayScalePercent: Int,
     val carPlayFps: Int,
     val carPlayHevc: Boolean?,
     val summary: String,
     val carPlayDirectVideo: Boolean? = null,
-    /** DiAuto `view-mode` SurfaceView on a constrained unit (no GPU pass per frame); null keeps the engine's. */
-    val aaSurfaceView: Boolean? = null,
 )
-
-/**
- * Automatic picture from the hardware decoder (docs/LOW_END_PERFORMANCE.md, "Picture rules").
- * Automatic never asks for more than it did before this policy existed (Android Auto: DiAuto's
- * own panel-sized resolution at 60 fps; CarPlay: the full panel at 30 fps); it only steps down
- * where the decoder or the device cannot carry that:
- *
- * 1. Codec: H.264 for both engines unless a hardware HEVC decoder exists (DiPlay #13: a wrong HEVC
- *    choice gives a black screen). With hardware HEVC the engines' own codec choice stays.
- * 2. Android Auto resolution: DiAuto's panel class (480p / 720p / 1080p), then down the ladder to
- *    the first size the H.264 decoder carries at 30 fps. A software decoder is held to 720p.
- * 3. Android Auto frame rate: 60 fps only when the decoder carries 60 at that size and the device
- *    is not low-end ([DeviceSignals.lowEnd]); otherwise 30.
- * 4. CarPlay size: the panel at 100 %, 75 % or 50 %, the first the decoder carries at 30 fps
- *    (a software decoder no more than 1280×720 pixels; slow hardware no more than 1600×900).
- *    CarPlay frame rate: 60 fps by the Android Auto rule above on hardware that is not slow, else 30. Qualcomm decoders hold
- *    about two frames, so 30 fps cost ~70 ms of lag on a phone used as the screen (2026-11-10).
- * 5. CarPlay video output: on slow hardware ([DeviceSignals.liteRendering]: ≤ 3 GB, weak GPU, slow
- *    CPU, …) DiPlay's Direct video output, a SurfaceView the compositor shows as it is, instead of
- *    a TextureView the app's GPU draws again for every frame (issue #4: lag on a 2 GB stereo).
- */
 object PicturePolicy {
-    const val AA_AUTOMATIC = 0
     val CARPLAY_SCALES = listOf(100, 75, 50)
     private const val SOFTWARE_MAX_PIXELS = 1280L * 720L
-    // ponytail: one pixel cap for every slow unit; keeps 1024x600-1920x720 panels at 100 %, shrinks
-    // 1080p and "2K" panels to 75 %. Tune per SoC if reports show a unit that carries more.
     private const val SLOW_HARDWARE_MAX_PIXELS = 1600L * 900L
-    /** A constrained unit's CarPlay picture: decoder output buffers and every copy scale with it. */
     private const val CONSTRAINED_MAX_PIXELS = 1280L * 720L
-
-    /** Automatic as it was before this policy: used when nothing is known about the decoder. */
-    val ENGINE_DEFAULTS = PictureChoice(AA_AUTOMATIC, 60, null, 100, 30, null, "engine defaults")
-
-    /** Every size [choose] and [turningHighRes] may ask about, so [DeviceCapabilities.read] probes exactly these. */
-    fun probeSizes(panel: VideoSize): Set<VideoSize> =
-        AaResolution.entries.map { it.stream(panel.portrait) }.toSet() + CARPLAY_SCALES.map { panel.scaled(it) } + AA_1440P
-
-    /** Android Auto's 1440p stream, landscape (a turning screen keeps one landscape stream). */
-    val AA_1440P = VideoSize(2560, 1440)
-
-    /**
-     * Whether a turning screen (phone, tablet) asks Android Auto for 1440p below a 2560-pixel panel
-     * (DiAuto `HostIntegration.turningHighResStream`). Medium and Large show a smaller region of the
-     * stream scaled up, so at 1080p they were soft (2.2x on a 2400x1080 phone at Small already).
-     * Android Auto sends 1440p only as H.265 (a 1440p H.264 profile gets no picture, DiAuto #35), so
-     * it needs a hardware HEVC decoder that carries 2560x1440 at 60 fps; DiAuto still also requires
-     * its HEVC reliability list. A panel under 1920 pixels gains little; low-end units never.
-     */
-    fun turningHighRes(caps: DeviceCapabilities): Boolean {
-        val hevc = caps.h265 ?: return false
-        return hevc.hardware && hevc.carries(AA_1440P, 60) && !caps.signals.lowEnd && !caps.signals.constrained &&
-            maxOf(caps.panel.width, caps.panel.height) >= 1920
-    }
-
-    /** The resolution DiAuto's own Automatic picks for this panel below 1440p (`HeadUnitScreenConfig.recalculate`). */
-    fun aaPanelClass(panel: VideoSize): AaResolution = if (panel.portrait) {
-        if (panel.width > 720 || panel.height > 1280) AaResolution.P1080 else AaResolution.P720
-    } else when {
-        panel.width <= 800 && panel.height <= 480 -> AaResolution.P480
-        panel.width > 1280 || panel.height > 720 -> AaResolution.P1080
-        else -> AaResolution.P720
-    }
-
+    val ENGINE_DEFAULTS = PictureChoice(100, 30, null, "engine defaults")
+    fun probeSizes(panel: VideoSize): Set<VideoSize> = CARPLAY_SCALES.map { panel.scaled(it) }.toSet()
     fun choose(caps: DeviceCapabilities): PictureChoice {
-        val hevcOk = caps.hardwareHevc
         val slow = caps.signals.liteRendering
-        val codecRule = (if (hevcOk) ENGINE_DEFAULTS else ENGINE_DEFAULTS.copy(aaCodec = H264, carPlayHevc = false))
-            .copy(carPlayDirectVideo = if (slow) true else null)
+        val defaults = ENGINE_DEFAULTS.copy(carPlayHevc = if (caps.hardwareHevc) null else false,
+            carPlayDirectVideo = if (slow) true else null)
         val avc = caps.h264
-        if (avc == null || avc.maxFps.isEmpty()) {
-            return codecRule.copy(summary = "no H.264 decoder answered; engine defaults" + directNote(slow) + lowEndNote(caps.signals))
-        }
-        val fits = { size: VideoSize -> avc.carries(size) && (avc.hardware || size.pixels <= SOFTWARE_MAX_PIXELS) }
-
-        val portrait = caps.panel.portrait
-        val panelClass = aaPanelClass(caps.panel)
-        // A constrained unit with a 1024x600-class panel decodes 480p: 720p there is mostly scaled away,
-        // and 480p is about half the decode work and output buffers (low-end round 5).
-        val aaCeiling = if (caps.signals.constrained && caps.panel.pixels <= 1024L * 600L) AaResolution.P480 else panelClass
-        val aa = AaResolution.entries.filter { it <= aaCeiling }.reversed().firstOrNull { fits(it.stream(portrait)) }
-            ?: AaResolution.P480
-        val aaFps = if (avc.hardware && !caps.signals.lowEnd && avc.carries(aa.stream(portrait), 60)) 60 else 30
+        if (avc == null || avc.maxFps.isEmpty()) return defaults.copy(summary = "no H.264 decoder answered; engine defaults")
         val scale = CARPLAY_SCALES.firstOrNull { percent ->
-            caps.panel.scaled(percent).let {
-                fits(it) && (!slow || it.pixels <= SLOW_HARDWARE_MAX_PIXELS) &&
-                    (!caps.signals.constrained || it.pixels <= CONSTRAINED_MAX_PIXELS)
+            caps.panel.scaled(percent).let { size ->
+                avc.carries(size) && (avc.hardware || size.pixels <= SOFTWARE_MAX_PIXELS) &&
+                    (!slow || size.pixels <= SLOW_HARDWARE_MAX_PIXELS) &&
+                    (!caps.signals.constrained || size.pixels <= CONSTRAINED_MAX_PIXELS)
             }
         } ?: CARPLAY_SCALES.last()
-        val carPlayFps = if (avc.hardware && !slow && !caps.signals.lowEnd && avc.carries(caps.panel.scaled(scale), 60)) 60 else 30
-
-        val codec = if (hevcOk) "engine's choice" else H264
-        val summary = "Android Auto ${aa.label}${if (aa == panelClass) " (panel)" else ""} $aaFps fps $codec; " +
-            "CarPlay $scale% of ${caps.panel} $carPlayFps fps $codec${directNote(slow)}; decoder ${avc.name}" +
-            (if (avc.hardware) "" else " (software)") + lowEndNote(caps.signals) +
-            (if (caps.signals.constrained) "; constrained: CarPlay at most 1280x720, Android Auto SurfaceView" +
-                (if (aaCeiling != panelClass) ", 480p" else "") else "")
-        return codecRule.copy(
-            aaResolutionId = if (aa == panelClass) AA_AUTOMATIC else aa.id,
-            aaFps = aaFps,
-            carPlayScalePercent = scale,
-            carPlayFps = carPlayFps,
-            aaSurfaceView = if (caps.signals.constrained) true else null,
-            summary = summary,
-        )
+        val fps = if (avc.hardware && !slow && !caps.signals.lowEnd && avc.carries(caps.panel.scaled(scale), 60)) 60 else 30
+        return defaults.copy(carPlayScalePercent = scale, carPlayFps = fps,
+            summary = "CarPlay $scale% of ${caps.panel}, $fps fps; decoder ${avc.name}" + if (slow) "; direct video output" else "")
     }
-
-    private fun directNote(slow: Boolean) = if (slow) " direct video output" else ""
-
-    private fun lowEndNote(signals: DeviceSignals) =
-        if (signals.liteRendering) "; low-end: ${signals.liteReasons.joinToString()}" else ""
-
-    const val H264 = "H.264"
 }

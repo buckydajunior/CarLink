@@ -34,12 +34,10 @@ import com.carlink.app.F150Profile
 import com.carlink.app.R
 import com.carlink.app.ui.CarLinkViewModel
 import com.carlink.app.ui.Route
-import com.carlink.app.ui.home.rememberProblemFix
 import com.carlink.app.ui.theme.CarLinkTokens
 import com.carlink.core.core.LinkProblem
 import com.carlink.core.core.LinkStage
 import com.carlink.core.core.LinkState
-import com.carlink.core.core.PhoneKind
 
 /** The USB-only product surface: no pairing, network picker, phone list or setup wizard. */
 @Composable
@@ -50,9 +48,9 @@ fun WiredHomeScreen(vm: CarLinkViewModel, navigate: (Route) -> Unit) {
     WiredHomeContent(
         link = home.link,
         needsPermissions = needsPermissions,
-        usbAttached = PhoneKind.IPHONE in home.usbKinds,
+        usbAttached = home.usbAttached,
         onSettings = { navigate(Route.SETTINGS) },
-        onConnect = { vm.connectUsb(PhoneKind.IPHONE) },
+        onConnect = vm::connectUsb,
         onRetry = vm::retry,
         onDisconnect = vm::disconnect,
         onOpen = vm::returnToProjection,
@@ -83,7 +81,7 @@ fun WiredHomeContent(
     val body = when {
         needsPermissions || link.problem == LinkProblem.PERMISSIONS -> R.string.carlink_f150_access_body
         link.problem == LinkProblem.CARPLAY_AUTH_MISSING -> R.string.carlink_f150_auth_missing
-        link.problem == LinkProblem.VPN_CONSENT -> R.string.carlink_home_error_vpn_body
+        link.problem == LinkProblem.VPN_CONSENT -> R.string.carlink_f150_vpn_body
         link.stage == LinkStage.CONNECTED -> R.string.carlink_f150_connected_body
         connecting -> R.string.carlink_f150_connecting_body
         link.stage == LinkStage.FAILED -> R.string.carlink_f150_failed_body

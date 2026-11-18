@@ -36,10 +36,10 @@ class HomeActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         Connection.onHomeShown(this)
-        vm.refreshPhones()
+        vm.refresh()
     }
 
-    /** Back on Home goes to the car's own launcher, as DiAuto's "Car home" did. */
+    /** Back on Home goes to the car's own launcher, without ending a live phone session. */
     private fun exitToCarHome() {
         val home = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         runCatching { startActivity(home) }.onFailure { moveTaskToBack(true) }
@@ -50,17 +50,14 @@ class HomeActivity : ComponentActivity() {
         consumeCarSettings(intent)
     }
 
-    /** The car tile in CarPlay / Android Auto opens Settings; the phone session keeps running. */
+    /** The car tile in CarPlay opens Settings; the phone session keeps running. */
     private fun consumeCarSettings(intent: Intent) {
         if (intent.getStringExtra("page") != PAGE_SETTINGS) return
         intent.removeExtra("page")
-        vm.settingsFromCar.value = true
+        vm.openSettingsFromCar()
     }
 
     companion object {
-        const val EXTRA_AUTO_PHONE_ADDRESS = "com.carlink.app.extra.AUTO_PHONE_ADDRESS"
-        const val EXTRA_AUTO_PHONE_KIND = "com.carlink.app.extra.AUTO_PHONE_KIND"
-        const val EXTRA_AUTO_PHONE_NAME = "com.carlink.app.extra.AUTO_PHONE_NAME"
         fun intent(context: Context): Intent = Intent(context, HomeActivity::class.java)
 
         /** DiPlay's page name for its settings, also used by CarPlay's "CarLink settings" menu button. */

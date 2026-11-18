@@ -9,12 +9,6 @@ plugins {
 val localAuthenticationAssets = providers.environmentVariable("DIPLAY_AUTH_ASSETS_DIR")
     .orNull?.let { file(it).canonicalFile }
 
-// About shows the CarPlay engine's own version. DiPlay keeps it in its (unbuilt) :mobile module,
-// so read it from there; a subtree pull then updates About without a CarLink change.
-val diPlayVersionName: String = Regex("""versionName\s*=\s*"([^"]+)"""")
-    .find(rootProject.file("vendor/diplay/mobile/build.gradle.kts").readText())
-    ?.groupValues?.get(1) ?: "unknown"
-
 /**
  * Copies the GPL-3.0 and AGPL-3.0 texts from the vendored engines into the APK's assets, so
  * About > Open-source licenses can show the full terms CarLink is distributed under.
@@ -22,6 +16,7 @@ val diPlayVersionName: String = Regex("""versionName\s*=\s*"([^"]+)"""")
 abstract class CarLinkLicenseAssets : DefaultTask() {
     @get:InputFile @get:PathSensitive(PathSensitivity.NONE) abstract val agplText: RegularFileProperty
     @get:InputFile @get:PathSensitive(PathSensitivity.NONE) abstract val gplText: RegularFileProperty
+    @get:InputFile @get:PathSensitive(PathSensitivity.NONE) abstract val componentNotices: RegularFileProperty
     @get:OutputDirectory abstract val outputDir: DirectoryProperty
 
     @TaskAction
@@ -31,6 +26,7 @@ abstract class CarLinkLicenseAssets : DefaultTask() {
         dir.mkdirs()
         agplText.get().asFile.copyTo(dir.resolve("AGPL-3.0.txt"))
         gplText.get().asFile.copyTo(dir.resolve("GPL-3.0.txt"))
+        componentNotices.get().asFile.copyTo(dir.resolve("NOTICE.txt"))
     }
 }
 
@@ -44,8 +40,9 @@ fun carLinkVersionCode(name: String): Int {
 androidComponents {
     onVariants { variant ->
         val licenses = tasks.register<CarLinkLicenseAssets>("${variant.name}CarLinkLicenseAssets") {
-            agplText.set(rootProject.file("vendor/diauto/LICENSE"))
+            agplText.set(rootProject.file("LICENSE"))
             gplText.set(rootProject.file("vendor/diplay/LICENSE"))
+            componentNotices.set(rootProject.file("vendor/diplay/docs/THIRD_PARTY_NOTICES.md"))
         }
         variant.sources.assets?.addGeneratedSourceDirectory(licenses, CarLinkLicenseAssets::outputDir)
     }
@@ -63,14 +60,11 @@ android {
         targetSdk = 37
         // Releases: change versionName only. versionCode = major * 10000 + minor * 100 + patch
         // (1.0.0 → 10000, 1.2.3 → 10203), so minor and patch stay below 100. The in-app updater
-        // (update/AppVersion.kt) and scripts/release.sh rely on it; docs/RELEASING.md.
-        versionName = "1.0.16"
+        // scripts/release.sh relies on it; docs/RELEASING.md.
+        versionName = "1.1.0"
         versionCode = carLinkVersionCode(versionName!!)
-        buildConfigField("String", "DIPLAY_VERSION_NAME", "\"$diPlayVersionName\"")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        // The Android Auto engine library ships two distribution flavors; CarLink uses github.
-        missingDimensionStrategy("distribution", "github")
     }
 
     // Only offline-mfi/ goes into the APK. Adding the whole private folder shipped release/ (the
@@ -210,14 +204,9 @@ dependencies {
     implementation(project(":carlink-core"))
     implementation(project(":carplay-common"))
     implementation(project(":carplay-shared"))
-    implementation(project(":androidauto"))
-    // Kotlin 2.4 needs AapProjectionActivity's AppCompatActivity supertype visible for `is` checks;
-    // the APK gets appcompat at runtime from :androidauto (same version).
-    compileOnly("androidx.appcompat:appcompat:1.6.1")
 
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)
-    implementation(libs.androidx.app.projected)
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.graphics)
@@ -231,8 +220,6 @@ dependencies {
     baselineProfile(project(":baselineprofile"))
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:${libs.versions.lifecycleRuntimeKtx.get()}")
     debugImplementation(libs.androidx.compose.ui.tooling)
-    // QR codes for source and project links in About (same version the Android Auto engine uses).
-    implementation("com.google.zxing:core:3.5.3")
 
     testImplementation(libs.junit)
     testImplementation(platform(libs.androidx.compose.bom))

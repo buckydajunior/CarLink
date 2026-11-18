@@ -1,3 +1,9 @@
+> **F-150 fork, version 1.1.0:** the current product has `:app` (three screens, log export),
+> `:carlink-core` (one USB CarPlay session, USB routing/wake/reset, display policy and timing history),
+> and DiPlay's `:carplay-common` / `:carplay-shared` engine. Android Auto and the generic wireless,
+> setup, updater and switcher layers described below were removed. See the root README and AGENTS.md
+> for the active build and device-test workflow. The remainder is retained as upstream history.
+
 # CarLink architecture
 
 How CarLink is put together: the modules, the processes, how a phone is detected and how a

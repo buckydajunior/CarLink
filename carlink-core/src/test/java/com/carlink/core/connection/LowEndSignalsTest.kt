@@ -1,12 +1,11 @@
 package com.carlink.core.connection
 
-import com.carlink.core.core.PhoneKind
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** The weak-GPU and slow-CPU signals, and when ":aa" is prewarmed (docs/LOW_END_PERFORMANCE.md, round 2). */
+/** The weak-GPU and slow-CPU signals, used by the CarPlay decoder policy (docs/LOW_END_PERFORMANCE.md, round 2). */
 class LowEndSignalsTest {
     private val arm = listOf("arm64-v8a", "armeabi-v7a", "armeabi")
     // The user's FYT stereo: Unisoc UIS8581A (SC9863A), 8× Cortex-A55 at 1.6 GHz, PowerVR GE8322, 4 GB.
@@ -53,24 +52,4 @@ class LowEndSignalsTest {
             .forEach { assertFalse(it, GpuClass.weak(it)) }
     }
 
-    @Test fun prewarmOnMemoryTightUnitsOnlyForAKnownAndroidPhone() {
-        val twoGb = DeviceSignals(totalRamMb = 1_950, lowRamDevice = false, cpuCores = 4, supportedAbis = arm)
-        assertFalse(EnginePrewarmPolicy.shouldPrewarm(twoGb, emptyList()))
-        assertFalse(EnginePrewarmPolicy.shouldPrewarm(twoGb, listOf(PhoneKind.IPHONE)))
-        assertTrue(EnginePrewarmPolicy.shouldPrewarm(twoGb, listOf(PhoneKind.IPHONE, PhoneKind.ANDROID)))
-        assertFalse(EnginePrewarmPolicy.shouldPrewarm(twoGb.copy(totalRamMb = 7_600, lowRamDevice = true), emptyList()))
-        // 4 GB and more: always, as before.
-        assertTrue(EnginePrewarmPolicy.shouldPrewarm(uis8581a, emptyList()))
-        assertTrue(EnginePrewarmPolicy.shouldPrewarm(tablet, listOf(PhoneKind.IPHONE)))
-    }
-
-    @Test fun aThreeGbUnitPrewarmsUntilItKnowsOnlyIPhones() {
-        val threeGb = DeviceSignals(totalRamMb = 2_780, lowRamDevice = false, cpuCores = 8, supportedAbis = arm)
-        assertTrue("no phone known yet", EnginePrewarmPolicy.shouldPrewarm(threeGb, emptyList()))
-        assertTrue(EnginePrewarmPolicy.shouldPrewarm(threeGb, listOf(PhoneKind.ANDROID)))
-        assertFalse("only iPhones: Android Auto starts when one first connects",
-            EnginePrewarmPolicy.shouldPrewarm(threeGb, listOf(PhoneKind.IPHONE)))
-        assertFalse("a low-RAM build stays safe", EnginePrewarmPolicy.shouldPrewarm(threeGb.copy(lowRamDevice = true), emptyList()))
-        assertFalse("2 GB stays as before", EnginePrewarmPolicy.shouldPrewarm(threeGb.copy(totalRamMb = 1_950), emptyList()))
-    }
 }

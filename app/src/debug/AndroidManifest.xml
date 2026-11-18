@@ -1,6 +1,0 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
-    <application>
-        <receiver android:name="com.andrerinas.openheadunit.hud.HudStatusReceiver" tools:node="remove" />
-        <activity android:name="com.andrerinas.openheadunit.hud.StandaloneHudDemoActivity" tools:node="remove" />
-    </application>
-</manifest>

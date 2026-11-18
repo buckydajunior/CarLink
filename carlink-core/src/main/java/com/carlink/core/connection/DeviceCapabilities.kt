@@ -159,9 +159,6 @@ data class DeviceCapabilities(
             ).also { signalsCache = it }
         }
 
-        /** Forgets the cached signals, so the next [signals] re-reads them (after [GpuProbe] learned the GPU). */
-        internal fun invalidateSignals() { signalsCache = null }
-
         /** Drops the decoder probe (memory pressure); the next session start probes again. */
         @Synchronized fun trimCaches() { cache = null }
 
@@ -230,7 +227,7 @@ data class DeviceCapabilities(
                 name.contains(".sw.") || name.contains("software"))
         }
 
-        /** DiAuto's `DecoderCapabilityReport.adequate`, with an empty performance-point list read as "not declared". */
+        /** An empty performance-point list means "not declared", not unsupported. */
         private fun adequate(video: MediaCodecInfo.VideoCapabilities, size: VideoSize, fps: Int): Boolean {
             val sizeOk = runCatching { video.isSizeSupported(size.width, size.height) }.getOrDefault(false)
             if (!sizeOk) return false

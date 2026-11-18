@@ -7,7 +7,6 @@ import com.carlink.app.ui.HomeActivity
 import com.carlink.app.ui.home.CarPlayWaitingContent
 import com.carlink.core.connection.CarLinkConfig
 import com.carlink.core.connection.CarLinkCore
-import com.carlink.core.connection.ConnectionPolicy
 import com.shilapi.xcertplay.CarPlayHostIntegration
 
 /** No Android Auto Application, second process, floating overlay or discovery startup. */
@@ -28,12 +27,11 @@ class CarLinkApplication : Application() {
                 .onFailure { Log.w("CarLink", "Could not open settings: $it") }
             Unit
         }
-        com.carlink.app.engine.EngineChrome.install(this, androidAuto = false)
+        com.carlink.app.engine.EngineChrome.install(this)
         CarLinkCore.install(this, CarLinkConfig(
             accessoryName = getString(R.string.app_name),
             host = HomeLauncher,
             waitingView = CarPlayWaitingContent::create,
-            connectionPolicy = ConnectionPolicy.USB_CARPLAY_ONLY,
         ))
         // Size changes apply on reconnect, preserving native video resolution.
         CarPlayHostIntegration.liveSizeWidthsMm = emptyList()

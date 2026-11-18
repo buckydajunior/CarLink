@@ -1,24 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!--
-  The F-150 product is a wired CarPlay receiver. The shared backend still includes both engine
-  libraries, so remove their unused Android Auto components and wireless permissions here.
--->
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools">
-
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
     <uses-feature android:name="android.hardware.telephony" android:required="false" />
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
-
-    <!-- HomeLauncher's full-screen notification when Home cannot be opened directly. -->
-    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
-    <!-- Diagnostics asks to keep CarLink ready when the car wakes (DESIGN_SPEC §6.4). -->
-    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
-    <!-- Wired CarPlay carries IP traffic through the USB/VPN bridge. CHANGE_NETWORK_STATE also
-         satisfies connectedDevice foreground-service startup before the USB grant arrives. -->
+    <!-- USB CarPlay carries IP traffic through a local VPN bridge. -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
-
+    <!-- The shared CarPlay engine still contains standalone wireless helpers. -->
     <uses-permission android:name="android.permission.BLUETOOTH" tools:node="remove" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" tools:node="remove" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" tools:node="remove" />
@@ -31,48 +19,22 @@
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" tools:node="remove" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" tools:node="remove" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" tools:node="remove" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" tools:node="remove" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" tools:node="remove" />
-    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:node="remove" />
-    <uses-permission android:name="android.permission.ACCESS_SUPERUSER" tools:node="remove" />
-    <uses-permission android:name="android.permission.READ_PHONE_STATE" tools:node="remove" />
-    <uses-permission android:name="android.permission.BROADCAST_STICKY" tools:node="remove" />
-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" tools:node="remove" />
-    <uses-permission android:name="android.permission.WRITE_SETTINGS" tools:node="remove" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" tools:node="remove" />
+    <uses-permission android:name="android.permission.WRITE_SETTINGS" tools:node="remove" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" tools:node="remove" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" tools:node="remove" />
+    <uses-permission android:name="moe.shizuku.manager.permission.API_V23" tools:node="remove" />
 
-    <!-- "Report a problem on GitHub" asks whether any browser opens web links (Android 11+ package visibility). -->
-    <queries>
-        <intent>
-            <action android:name="android.intent.action.VIEW" />
-            <category android:name="android.intent.category.BROWSABLE" />
-            <data android:scheme="https" />
-        </intent>
-    </queries>
-
-    <application
-        android:name=".CarLinkApplication"
-        android:allowBackup="false"
-        android:dataExtractionRules="@xml/carlink_data_extraction_rules"
-        android:fullBackupContent="false"
-        android:hardwareAccelerated="true"
-        android:icon="@mipmap/ic_launcher"
-        android:label="@string/app_name"
-        android:largeHeap="true"
-        android:localeConfig="@xml/locales_config"
-        android:resizeableActivity="true"
-        android:roundIcon="@mipmap/ic_launcher_round"
-        android:supportsRtl="true"
-        android:theme="@style/Theme.CarLink"
+    <application android:name=".CarLinkApplication" android:allowBackup="false"
+        android:dataExtractionRules="@xml/carlink_data_extraction_rules" android:fullBackupContent="false"
+        android:hardwareAccelerated="true" android:icon="@mipmap/ic_launcher" android:label="@string/app_name"
+        android:largeHeap="true" android:localeConfig="@xml/locales_config" android:resizeableActivity="true"
+        android:roundIcon="@mipmap/ic_launcher_round" android:supportsRtl="true" android:theme="@style/Theme.CarLink"
         tools:replace="android:name,android:label,android:icon,android:roundIcon,android:theme,android:allowBackup,android:fullBackupContent,android:dataExtractionRules,android:localeConfig">
-
-        <activity
-            android:name=".ui.HomeActivity"
-            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|density|uiMode"
-            android:exported="true"
-            android:launchMode="singleTask"
-            android:theme="@style/Theme.CarLink.Starting"
-            android:windowSoftInputMode="adjustResize">
+        <activity android:name=".ui.HomeActivity" android:exported="true" android:launchMode="singleTask"
+            android:theme="@style/Theme.CarLink.Starting" android:windowSoftInputMode="adjustResize"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|density|uiMode">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -84,60 +46,19 @@
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
-
-        <!-- Lets Macrobenchmark and Perfetto trace the release build from adb (no debugging, no
-             data access); Android's recommended setting for measuring release builds. -->
+        <!-- Standalone engine tools/widgets are not entry points in the dedicated receiver. -->
+        <activity android:name="com.shilapi.xcertplay.DiPlayActivity" tools:node="remove" />
+        <activity android:name="com.shilapi.xcertplay.MainActivity" tools:node="remove" />
+        <activity android:name="com.shilapi.xcertplay.AdbClusterActivity" tools:node="remove" />
+        <receiver android:name="com.shilapi.xcertplay.NavigationWidget" tools:node="remove" />
+        <provider android:name="com.shilapi.xcertplay.update.UpdateApkProvider" tools:node="remove" />
+        <service android:name="com.shilapi.xcertplay.MapEmbedService" tools:node="remove" />
         <profileable android:shell="true" tools:targetApi="29" />
-
-        <!-- Keep the actual wired session and VPN services; location forwarding is not used. -->
-        <service
-            android:name="com.shilapi.xcertplay.DiPlaySessionService"
-            android:foregroundServiceType="connectedDevice|microphone"
-            tools:replace="android:foregroundServiceType" />
-
-        <!-- The shared receiver keeps ignition/boot handling, but Bluetooth must not wake this app. -->
-        <receiver android:name="com.carlink.core.entry.SystemEventReceiver" android:exported="true">
-            <intent-filter tools:node="removeAll" />
-            <intent-filter>
-                <action android:name="android.intent.action.BOOT_COMPLETED" />
-                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
-                <action android:name="com.htc.intent.action.QUICKBOOT_POWERON" />
-                <action android:name="com.mediatek.intent.action.QUICKBOOT_POWERON" />
-                <action android:name="com.mediatek.intent.action.BOOT_IPO" />
-                <action android:name="com.fyt.boot.ACCON" />
-                <action android:name="com.glsx.boot.ACCON" />
-                <action android:name="android.intent.action.ACTION_MT_COMMAND_SLEEP_OUT" />
-                <action android:name="com.cayboy.action.ACC_ON" />
-                <action android:name="com.carboy.action.ACC_ON" />
-            </intent-filter>
-        </receiver>
-
-        <receiver android:name=".update.UpdateInstallReceiver" tools:node="remove" />
-        <receiver android:name="com.carlink.core.connection.aa.AaCommandReceiver" tools:node="remove" />
-        <receiver android:name="androidx.media.session.MediaButtonReceiver" tools:node="remove" />
-        <receiver android:name="com.andrerinas.openheadunit.app.RemoteControlReceiver" tools:node="remove" />
-        <receiver android:name="com.andrerinas.openheadunit.connection.CarKeyReceiver" tools:node="remove" />
-        <provider android:name="com.carlink.core.engine.AndroidAutoSettingsProvider" tools:node="remove" />
-        <provider android:name="rikka.shizuku.ShizukuProvider" tools:node="remove" />
-        <service android:name="com.andrerinas.openheadunit.aap.AapService" tools:node="remove" />
-        <service android:name="com.andrerinas.openheadunit.location.GpsLocationService" tools:node="remove" />
-        <service android:name="com.andrerinas.openheadunit.aap.DummyVpnService" tools:node="remove" />
-        <activity android:name="com.andrerinas.openheadunit.aap.AapProjectionActivity" tools:node="remove" />
-        <activity android:name="com.andrerinas.openheadunit.app.UsbAttachedActivity" tools:node="remove" />
-        <activity android:name="com.andrerinas.openheadunit.main.MainActivity" tools:node="remove" />
-        <activity android:name="com.andrerinas.openheadunit.main.SettingsActivity" tools:node="remove" />
-        <activity android:name="com.andrerinas.openheadunit.main.OnboardingActivity" tools:node="remove" />
-        <activity android:name="com.andrerinas.openheadunit.main.AutomationActivity" tools:node="remove" />
-
-        <!-- Shares Diagnostics' connection log (cache/shared only); independent of the engines' providers. -->
-        <provider
-            android:name=".diagnostics.CarLinkFileProvider"
-            android:authorities="${applicationId}.carlink.files"
-            android:exported="false"
-            android:grantUriPermissions="true">
-            <meta-data
-                android:name="android.support.FILE_PROVIDER_PATHS"
-                android:resource="@xml/carlink_file_paths" />
+        <service android:name="com.shilapi.xcertplay.DiPlaySessionService"
+            android:foregroundServiceType="connectedDevice|microphone" tools:replace="android:foregroundServiceType" />
+        <provider android:name=".diagnostics.CarLinkFileProvider" android:authorities="${applicationId}.carlink.files"
+            android:exported="false" android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/carlink_file_paths" />
         </provider>
     </application>
 </manifest>
