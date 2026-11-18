@@ -10,6 +10,8 @@ import android.util.Log
 import com.carlink.core.core.PhoneKind
 import com.carlink.core.detect.PhoneClassifier
 import com.carlink.core.connection.Connection
+import com.carlink.core.connection.CarLinkCore
+import com.carlink.core.connection.CarLinkHost
 
 /**
  * CarLink's only USB_DEVICE_ATTACHED handler (both engines' filters are removed from the merged
@@ -36,12 +38,17 @@ class UsbRouterActivity : Activity() {
         Log.i(TAG, "USB ${"%04x:%04x".format(device.vendorId, device.productId)} -> $kind")
         com.carlink.core.diagnostics.EventLog.add("USB", "${"%04x:%04x".format(device.vendorId, device.productId)} -> $kind")
         if (kind == PhoneKind.UNKNOWN) return
+        val session = Connection.get(this)
+        // A cold attach may already be claimed by Application's watcher, with preflight blocked
+        // or projection waiting for an Activity to resume. Open Home while this system launch
+        // allows it, but never cover an existing host during the engine's USB re-enumeration.
+        if (session.needsHostUi()) CarLinkCore.config.host.openHome(this, CarLinkHost.OpenReason.USB_ATTACHED)
         if (!UsbWatcher.get(this).claim(device)) {
             Log.i(TAG, "USB attach already routed by the watcher")
             return
         }
         // The attach intent carries the UsbDevice: DiPlay reads it for a wired iPhone, and the engine can find that exact device.
-        Connection.get(this).onUsbPhone(kind, "iPhone", intent)
+        session.onUsbPhone(kind, "iPhone", intent)
     }
 
     companion object {

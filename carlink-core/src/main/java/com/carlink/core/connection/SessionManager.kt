@@ -120,6 +120,8 @@ class SessionManager(
         if (_state.value is SessionState.Active) return
         start(SessionRequest(phoneName, attach))
     }
+    /** A cold USB launch needs a screen; internal re-enumeration must leave an existing host visible. */
+    fun needsHostUi(): Boolean = _state.value is SessionState.Blocked || _state.value is SessionState.Failed || !adapter.hasSession()
     fun onUsbDetached() {
         val shown = _state.value
         if (shown is SessionState.Blocked || shown is SessionState.Failed) {

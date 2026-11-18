@@ -10,7 +10,7 @@ import com.carlink.core.entry.UsbWatcher
 import com.shilapi.xcertplay.AirPlayPersistence
 
 interface CarLinkHost {
-    enum class OpenReason { UNPLUGGED }
+    enum class OpenReason { USB_ATTACHED, UNPLUGGED }
     fun openHome(context: Context, reason: OpenReason)
 }
 
