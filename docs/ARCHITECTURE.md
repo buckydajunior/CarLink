@@ -1,4 +1,4 @@
-> **F-150 fork, version 1.2.2:** the current product has `:app` (clock/status, settings, music EQ,
+> **F-150 fork, version 1.2.3:** the current product has `:app` (clock/status, settings, music EQ, call audio,
 > About and log export), `:carlink-core` (one USB CarPlay session, USB routing/wake/reset,
 > display policy, per-renderer music PCM equalization and timing history),
 > and DiPlay's `:carplay-common` / `:carplay-shared` engine. Android Auto and the generic wireless,
@@ -32,6 +32,16 @@ as media, navigation, Siri and microphone remain outside the DSP path. Each rend
 history. Steady Off/flat is an O(1) byte-exact bypass; active processing uses five peaking biquads,
 20 ms bank crossfades and headroom/saturation. It does not change AudioTrack sizing, routing or
 USB startup. DSP/routing tests cannot verify a Linkswell's acoustic output or CPU/connection time.
+
+`F150Profile` applies the software-call-AEC default once on fresh installs and upgrades; subsequent
+Off selections persist. Call audio settings write the existing engine preference and apply on a
+new connection. The engine retains per-call speaker references and its platform-effects fallback.
+Call capture reads one transport frame at a time, and original telephony uses a duration-based
+playback start/write plan even when mapped to the media channel. API 31+ requests AudioTrack's
+native start threshold; older/failed-setter paths request two start windows as the effective
+buffer, retaining allocation. Device-clamped values and failures are logged; other stream buffering is retained.
+Exported microphone diagnostics report actual software/platform effect states and batch duration,
+without recording call audio. Desktop tests verify policy and lifecycle, not acoustic effectiveness.
 
 # CarLink architecture
 

@@ -64,6 +64,7 @@ class CarLinkViewModel(application: Application) : AndroidViewModel(application)
     private val _settingsRequests = MutableStateFlow(0L)
     private val _systemBars = MutableStateFlow(bars.load())
     private val _equalizer = MutableStateFlow(EqualizerController.loadSettings(app))
+    private val _callEchoCancellation = MutableStateFlow(AirPlayPersistence.loadCallEchoCancellation(app))
 
     val display: StateFlow<DisplayPrefs> = MutableStateFlow(DisplayPrefs(
         uiPreferences.themeMode, uiPreferences.uiProfileMode, uiPreferences.interfaceScale,
@@ -78,6 +79,7 @@ class CarLinkViewModel(application: Application) : AndroidViewModel(application)
     val settingsRequests: StateFlow<Long> = _settingsRequests.asStateFlow()
     val systemBars = _systemBars.asStateFlow()
     val equalizer = _equalizer.asStateFlow()
+    val callEchoCancellation = _callEchoCancellation.asStateFlow()
 
     private val usbReceiver = object : android.content.BroadcastReceiver() {
         override fun onReceive(context: android.content.Context, intent: Intent) {
@@ -111,6 +113,7 @@ class CarLinkViewModel(application: Application) : AndroidViewModel(application)
         _carPlayWidth.value = AirPlayPersistence.loadWidthPhysicalMm(app)
         _systemBars.value = bars.load()
         _equalizer.value = EqualizerController.loadSettings(app)
+        _callEchoCancellation.value = AirPlayPersistence.loadCallEchoCancellation(app)
     }
 
     fun missingPermissions(): List<String> = DevicePreflight.requiredPermissions()
@@ -151,6 +154,11 @@ class CarLinkViewModel(application: Application) : AndroidViewModel(application)
 
     fun resetEqualizer() { _equalizer.value = EqualizerController.reset(app) }
 
+    fun setCallEchoCancellation(enabled: Boolean) {
+        AirPlayPersistence.saveCallEchoCancellation(app, enabled)
+        _callEchoCancellation.value = enabled
+    }
+
     private fun saveEqualizer(settings: EqualizerSettings) {
         _equalizer.value = EqualizerController.saveSettings(app, settings)
     }
@@ -160,7 +168,8 @@ class CarLinkViewModel(application: Application) : AndroidViewModel(application)
             val file = withContext(Dispatchers.IO) {
                 ConnectionLog.export(app, "F-150 Lariat / Linkswell / USB CarPlay\n" +
                     "Version ${BuildConfig.VERSION_NAME}; Android ${android.os.Build.VERSION.RELEASE}\n" +
-                    "Device ${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}; CarPlay width ${_carPlayWidth.value} mm")
+                    "Device ${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}; CarPlay width ${_carPlayWidth.value} mm\n" +
+                    "Software call echo cancellation requested: ${_callEchoCancellation.value}")
             }
             val label = app.getString(R.string.carlink_f150_share_log)
             CarLinkFileProvider.shareText(app, file, label, label)

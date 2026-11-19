@@ -18,8 +18,9 @@ import com.carlink.app.ui.about.AboutScreen
 import com.carlink.app.ui.wired.WiredHomeScreen
 import com.carlink.app.ui.wired.WiredSettingsScreen
 import com.carlink.app.ui.wired.EqualizerScreen
+import com.carlink.app.ui.wired.CallAudioScreen
 
-enum class Route { HOME, SETTINGS, EQUALIZER, ABOUT }
+enum class Route { HOME, SETTINGS, EQUALIZER, CALL_AUDIO, ABOUT }
 
 /** The CarPlay car tile returns to its running projection on Back. */
 @Composable
@@ -40,7 +41,7 @@ fun CarLinkApp(vm: CarLinkViewModel, onExitToCarHome: () -> Unit) {
     LaunchedEffect(requests) { if (requests > 0) { route = Route.SETTINGS; fromCar = true } }
     val back: () -> Unit = {
         when (route) {
-            Route.ABOUT, Route.EQUALIZER -> route = Route.SETTINGS
+            Route.ABOUT, Route.EQUALIZER, Route.CALL_AUDIO -> route = Route.SETTINGS
             Route.SETTINGS -> {
                 route = Route.HOME
                 if (fromCar) vm.returnToProjection()
@@ -53,8 +54,9 @@ fun CarLinkApp(vm: CarLinkViewModel, onExitToCarHome: () -> Unit) {
     when (route) {
         Route.HOME -> WiredHomeScreen(vm) { route = it }
         Route.SETTINGS -> WiredSettingsScreen(vm, onBack = back, onAbout = { route = Route.ABOUT },
-            onEqualizer = { route = Route.EQUALIZER })
+            onEqualizer = { route = Route.EQUALIZER }, onCallAudio = { route = Route.CALL_AUDIO })
         Route.EQUALIZER -> EqualizerScreen(vm, onBack = back)
+        Route.CALL_AUDIO -> CallAudioScreen(vm, onBack = back)
         Route.ABOUT -> AboutScreen(onBack = back)
     }
 }

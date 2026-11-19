@@ -393,10 +393,14 @@ class TelephonyMicrophoneTest {
     }
 
     @Test fun defaultCallCaptureKeepsPlatformEffectsWithoutStartingExperimentalProcessing() {
+        val diagnostics = recordDiagnostics()
         sink.onMicrophoneStarted(telephony, config("telephony"))
         assertEquals(AudioRecord.RECORDSTATE_RECORDING, awaitCapture().recordingState)
         assertEquals(2, ShadowAudioEffect.getAudioEffects().size)
         assertFalse(microphoneLog().contains("echo canceller"))
+        val processing = diagnostics.single { it.startsWith("Microphone: call processing ") }
+        assertTrue(processing, processing.contains("nativeEcho=off platformAec=enabled platformNs=enabled"))
+        assertTrue(processing, processing.contains("readBytes=${config("telephony").frameBytes}"))
     }
 
     @Test fun softwareCallCaptureDisablesPlatformAecBeforeProcessingAndReleasesBothOnClose() {

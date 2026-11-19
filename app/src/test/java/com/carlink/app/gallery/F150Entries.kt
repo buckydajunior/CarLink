@@ -6,6 +6,7 @@ import androidx.compose.runtime.Composable
 import com.carlink.app.ui.wired.WiredHomeContent
 import com.carlink.app.ui.wired.WiredSettingsContent
 import com.carlink.app.ui.wired.EqualizerContent
+import com.carlink.app.ui.wired.CallAudioContent
 import com.carlink.core.audio.EqualizerSettings
 import com.carlink.core.settings.SystemBarVisibility
 import com.carlink.core.core.Engine
@@ -30,6 +31,8 @@ fun f150Entries() = listOf(
     GalleryEntry("settings-bars") { WiredSettingsContent(180, bars = SystemBarVisibility(true, true)) },
     GalleryEntry("equalizer") { EqualizerContent(EqualizerSettings(true, listOf(3f, 1f, 0f, -2f, 2f))) },
     GalleryEntry("equalizer-off") { EqualizerContent(EqualizerSettings()) },
+    GalleryEntry("call-audio") { CallAudioContent(true) },
+    GalleryEntry("call-audio-off") { CallAudioContent(false) },
     GalleryEntry("connected") {
         WiredHomeContent(LinkState(LinkStage.CONNECTED, Engine.CARPLAY, Transport.USB))
     },

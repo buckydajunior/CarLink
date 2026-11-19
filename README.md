@@ -11,7 +11,7 @@ The app has one launcher icon and one visible recent-apps card. Projection keeps
 task so opening Settings preserves the running phone connection; Open CarPlay returns to it.
 
 Settings has independent tablet status-bar and bottom-bar/dock switches (either, both or neither),
-a five-band music equalizer, larger projected CarPlay icon presets, connection-log export, source
+a five-band music equalizer, call echo control, larger projected CarPlay icon presets, connection-log export, source
 credits and complete licenses. Bar changes apply on return to CarPlay using the engine's existing
 inset handling and may briefly reconnect it; the bottom bar is Android's navigation/taskbar, subject
 to the Linkswell firmware.
@@ -24,6 +24,23 @@ steps. It starts Off and flat, applies adjustments when a slider is released, an
 state when Reset to flat is pressed. Each audio renderer has independent filter history, with
 short crossfades on changes and automatic headroom for boosts. Stable Off/flat leaves PCM bytes
 unchanged. Unsupported formats bypass it; no global/system equalizer or new audio buffers are used.
+
+Settings > Call audio controls the engine's existing software echo canceller. Version 1.2.3 enables
+it once on install/upgrade for this truck; later restarts preserve an Off choice. Unplug/reconnect
+after changing it. Matching mono call audio uses the speaker reference; unsupported/failed software
+processing keeps/restores Android's available call effects. Software and platform AEC are not
+deliberately stacked. This targets the other person's voice echoing back through the microphone;
+it does not establish the cause of every kind of feedback. Music EQ still bypasses calls.
+
+Calls now read one microphone packet frame at a time and use a sample-rate-based playback start
+threshold, respecting Android's minimum buffer. Android 12+ receives a native start-threshold
+request; older devices or a failed request use a two-window effective buffer, keeping the original
+allocation. Rejected adjustments retain the working track and are logged. This removes fixed
+byte-count batching that grew longer at lower call sample rates. The call policy follows original
+telephony identity even when audio is routed as media; music, Siri and navigation buffering stay unchanged. Exported call-start
+diagnostics identify the requested frame/read sizes and actual software/platform effect states.
+These are code-level latency changes; end-to-end call delay and acoustic suppression need testing
+on the Linkswell.
 
 The 1.2.1 stability patch prevents a late close callback from a replaced or explicitly retired
 video stream from ending the live CarPlay session. Genuine EOF/errors from the current stream
@@ -62,9 +79,10 @@ If Android asks which app should handle USB, select **F-150 CarPlay**. Its packa
 
 Test cold startup, quick replug, phone left connected across ignition, Siri/calls/music,
 steering-wheel controls, reverse-camera return, icon sizes, all four bar combinations and EQ
-on/off/music balance while navigation or calls play. The user has run v1.2.0 and reported rare
-automatic reconnects and startup sometimes requiring a replug. **The fixes and full hardware test
-matrix still need validation on the Linkswell.** Settings > Share connection log exports
+on/off/music balance while navigation or calls play. The user reports that v1.2.2 startup works
+well, and has now reported call feedback/possible delay. The cause of the earlier rare automatic
+reconnects is still unconfirmed. **The call changes and full hardware test matrix need validation
+on the Linkswell.** Settings > Share connection log exports
 `WIRED_TIMING`, boot/wake/USB readiness and app events for diagnosis. No on-car speed is claimed
 from unit tests.
 

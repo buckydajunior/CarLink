@@ -33,4 +33,26 @@ class F150ProfileTest {
         F150Profile.install(app)
         assertEquals(120, AirPlayPersistence.loadWidthPhysicalMm(app))
     }
+
+    @Test fun freshInstallEnablesSoftwareCallEchoCancellation() {
+        F150Profile.install(app)
+        assertTrue(AirPlayPersistence.loadCallEchoCancellation(app))
+    }
+
+    @Test fun existingInstallGetsCallDefaultWithoutResettingDisplay() {
+        app.getSharedPreferences("f150_profile", Application.MODE_PRIVATE)
+            .edit().putBoolean("installed", true).commit()
+        AirPlayPersistence.saveWidthPhysicalMm(app, 120)
+        AirPlayPersistence.saveCallEchoCancellation(app, false)
+        F150Profile.install(app)
+        assertTrue(AirPlayPersistence.loadCallEchoCancellation(app))
+        assertEquals(120, AirPlayPersistence.loadWidthPhysicalMm(app))
+    }
+
+    @Test fun laterRestartsRespectTheDriversOffChoice() {
+        F150Profile.install(app)
+        AirPlayPersistence.saveCallEchoCancellation(app, false)
+        F150Profile.install(app)
+        assertFalse(AirPlayPersistence.loadCallEchoCancellation(app))
+    }
 }

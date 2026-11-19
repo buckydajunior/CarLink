@@ -79,12 +79,13 @@ fun WiredHomeContent(
 }
 
 @Composable
-fun WiredSettingsScreen(vm: CarLinkViewModel, onBack: () -> Unit, onAbout: () -> Unit, onEqualizer: () -> Unit) {
+fun WiredSettingsScreen(vm: CarLinkViewModel, onBack: () -> Unit, onAbout: () -> Unit, onEqualizer: () -> Unit,
+    onCallAudio: () -> Unit) {
     val width by vm.carPlayWidth.collectAsStateWithLifecycle()
     val bars by vm.systemBars.collectAsStateWithLifecycle()
     val equalizer by vm.equalizer.collectAsStateWithLifecycle()
     WiredSettingsContent(width, vm::setCarPlayWidth, onBack, onAbout, vm::shareWiredLog,
-        bars, vm::showStatusBar, vm::showBottomBar, equalizer.enabled, onEqualizer)
+        bars, vm::showStatusBar, vm::showBottomBar, equalizer.enabled, onEqualizer, onCallAudio)
 }
 
 @Composable
@@ -99,6 +100,7 @@ fun WiredSettingsContent(
     onBottomBar: (Boolean) -> Unit = {},
     equalizerEnabled: Boolean = false,
     onEqualizer: () -> Unit = {},
+    onCallAudio: () -> Unit = {},
 ) {
     val labels = listOf(
         R.string.carlink_f150_size_standard, R.string.carlink_f150_size_large,
@@ -121,6 +123,10 @@ fun WiredSettingsContent(
         OutlinedButton(onEqualizer, Modifier.fillMaxWidth().heightIn(min = CarLinkTokens.dimens.minTouch)) {
             Text(stringResource(R.string.carlink_f150_equalizer), Modifier.weight(1f))
             Text(stringResource(if (equalizerEnabled) R.string.carlink_f150_on else R.string.carlink_f150_off))
+        }
+        Spacer(Modifier.height(12.dp))
+        OutlinedButton(onCallAudio, Modifier.fillMaxWidth().heightIn(min = CarLinkTokens.dimens.minTouch)) {
+            Text(stringResource(R.string.carlink_f150_call_audio))
         }
         Spacer(Modifier.height(32.dp))
         Text(stringResource(R.string.carlink_f150_icon_size), style = MaterialTheme.typography.headlineMedium)
