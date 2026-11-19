@@ -25,6 +25,11 @@ state when Reset to flat is pressed. Each audio renderer has independent filter 
 short crossfades on changes and automatic headroom for boosts. Stable Off/flat leaves PCM bytes
 unchanged. Unsupported formats bypass it; no global/system equalizer or new audio buffers are used.
 
+The 1.2.1 stability patch prevents a late close callback from a replaced or explicitly retired
+video stream from ending the live CarPlay session. Genuine EOF/errors from the current stream
+still trigger normal session teardown. This fixes a reproducible engine race; a log from the
+head unit is needed to establish whether it caused a particular rare interruption.
+
 ## Removed
 
 Android Auto's engine/native libraries and module dependencies, generic Bluetooth/Wi-Fi/hotspot

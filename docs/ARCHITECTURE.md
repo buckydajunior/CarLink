@@ -1,4 +1,4 @@
-> **F-150 fork, version 1.2.0:** the current product has `:app` (clock/status, settings, music EQ,
+> **F-150 fork, version 1.2.1:** the current product has `:app` (clock/status, settings, music EQ,
 > About and log export), `:carlink-core` (one USB CarPlay session, USB routing/wake/reset,
 > display policy, per-renderer music PCM equalization and timing history),
 > and DiPlay's `:carplay-common` / `:carplay-shared` engine. Android Auto and the generic wireless,
