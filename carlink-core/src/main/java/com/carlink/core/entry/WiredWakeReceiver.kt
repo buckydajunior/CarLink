@@ -7,7 +7,10 @@ import android.content.Intent
 /** Re-scan an already-connected cable after ignition wake; never starts a radio or opens Home. */
 class WiredWakeReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action in ACTIONS) UsbWatcher.get(context).start()
+        if (intent.action in ACTIONS) {
+            com.carlink.core.diagnostics.EventLog.add("USB", "boot/ignition wake: ${intent.action}")
+            UsbWatcher.get(context).onWake()
+        }
     }
     companion object {
         internal val ACTIONS = setOf(

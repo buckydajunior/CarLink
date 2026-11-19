@@ -68,6 +68,7 @@ class SessionManager(
     private var quickRetries = 0
     private var driverStoppedAt = -REENUMERATION_WINDOW_MILLIS
     private var driverStoppedWithPhone = false
+    private var automaticStartPaused = false
     private class Attempt(val request: SessionRequest, val plan: SessionPlan, now: Long) {
         var startedAt = now
         var stage = ProgressStage.WAITING_FOR_PHONE
@@ -120,6 +121,21 @@ class SessionManager(
         if (_state.value is SessionState.Active) return
         start(SessionRequest(phoneName, attach))
     }
+    /** Wake/foreground scans can retry the same node without inventing a fresh USB attachment. */
+    fun onUsbReady(kind: PhoneKind, phoneName: String?, attach: Intent?): Boolean {
+        if (kind != PhoneKind.IPHONE) return false
+        if (_state.value is SessionState.Active) {
+            onUsbPhone(kind, phoneName, attach)
+            return true
+        }
+        if (automaticStartPaused) {
+            note("USB ready rescan; keeping the driver's disconnect")
+            return false
+        }
+        note("USB ready rescan; retrying the listed iPhone")
+        start(SessionRequest(phoneName, attach))
+        return true
+    }
     /** A cold USB launch needs a screen; internal re-enumeration must leave an existing host visible. */
     fun needsHostUi(): Boolean = _state.value is SessionState.Blocked || _state.value is SessionState.Failed || !adapter.hasSession()
     fun onUsbDetached() {
@@ -144,6 +160,7 @@ class SessionManager(
     }
     fun onSettingsChanged() { if (_state.value is SessionState.Blocked) retry() }
     fun disconnect() {
+        automaticStartPaused = true
         val active = _state.value.isActive
         markDriverStop()
         stop()
@@ -162,6 +179,7 @@ class SessionManager(
         driverStoppedAt = clock()
     }
     private fun start(request: SessionRequest) {
+        automaticStartPaused = false
         driverStoppedWithPhone = false
         sessionId++
         note("start CARPLAY USB")
@@ -241,6 +259,7 @@ class SessionManager(
             }
             is AdapterEvent.Restart -> replaceAttempt(a, SessionState.Phase.Starting)
             is AdapterEvent.Ended -> {
+                if (event.byUser) automaticStartPaused = true
                 if (!event.byUser && !environment.usbPhonePresent()) environment.returnHome()
                 markDriverStop(); stop()
             }

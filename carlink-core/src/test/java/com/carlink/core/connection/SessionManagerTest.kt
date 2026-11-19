@@ -153,4 +153,51 @@ class SessionManagerTest {
         assertEquals(SessionState.Phase.Connected, (m.state.value as SessionState.Active).phase)
         assertEquals(1, m.health.value.single().successes)
     }
+
+    @Test fun readinessRecoveryWaitsForAnUnfinishedFailedSessionTeardown() {
+        val m = manager(); plug(m); adapter.immediateStop = false
+        adapter.emit(AdapterEvent.Failed(FailureReason.USB, "boot USB not ready")); idle()
+        assertTrue(m.state.value is SessionState.Failed)
+        m.onUsbReady(PhoneKind.IPHONE, "iPhone", Intent()); idle()
+        assertEquals(1, adapter.plans.size)
+        adapter.finishStop(); idle()
+        assertEquals(2, adapter.plans.size)
+    }
+
+    @Test fun readinessRecoveryKeepsAnActiveEngineRetryInsteadOfRestartingIt() {
+        val m = manager(); plug(m)
+        adapter.emit(AdapterEvent.Connected); idle()
+        adapter.emit(AdapterEvent.Retrying(1, FailureReason.USB)); idle()
+        m.onUsbReady(PhoneKind.IPHONE, "iPhone", Intent()); idle()
+        assertEquals(1, adapter.plans.size)
+        assertEquals(0, adapter.stopCount)
+        assertTrue((m.state.value as SessionState.Active).phase is SessionState.Phase.Retrying)
+    }
+
+    @Test fun engineNotificationDisconnectAlsoPausesReadinessRecovery() {
+        val m = manager(); plug(m)
+        adapter.emit(AdapterEvent.Ended(true)); idle(); advance(11_000)
+        m.onUsbReady(PhoneKind.IPHONE, "iPhone", Intent()); idle()
+        assertEquals(SessionState.Idle, m.state.value)
+        assertEquals(1, adapter.plans.size)
+        m.connectUsb(); idle()
+        assertEquals(2, adapter.plans.size)
+    }
+
+    @Test fun aNonUserEndCanRecoverOnWakeWhileTheSameCableIsStillPresent() {
+        val m = manager(); plug(m)
+        adapter.emit(AdapterEvent.Ended(false)); idle()
+        m.onUsbReady(PhoneKind.IPHONE, "iPhone", Intent()); idle()
+        assertEquals(2, adapter.plans.size)
+    }
+
+    @Test fun readinessRechecksBootPreflightWithoutBypassingRequiredConsent() {
+        problems = listOf(Problem.VPN_CONSENT)
+        val m = manager(); plug(m)
+        m.onUsbReady(PhoneKind.IPHONE, "iPhone", Intent()); idle()
+        assertTrue(adapter.plans.isEmpty())
+        problems = emptyList()
+        m.onUsbReady(PhoneKind.IPHONE, "iPhone", Intent()); idle()
+        assertEquals(1, adapter.plans.size)
+    }
 }

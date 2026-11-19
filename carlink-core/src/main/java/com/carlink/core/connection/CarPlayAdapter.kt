@@ -1,12 +1,9 @@
 package com.carlink.core.connection
 
-import android.app.Activity
-import android.app.ActivityManager
 import android.app.Application
 import android.content.Context
 import android.content.Intent
 import android.os.Build
-import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -76,6 +73,7 @@ class CarPlayAdapter internal constructor(private val hooks: CarPlayEngineHooks)
     companion object {
         fun install(context: Context) {
             val app = context.applicationContext
+            CarPlayForegroundGate.install(app as Application)
             CarPlayHostIntegration.accessoryName = CarLinkCore.config.accessoryName
             CarPlayHostIntegration.resetDebugLogsOnBootstrap = false
             CarPlayHostIntegration.vehicleIntegrations = false
@@ -108,9 +106,9 @@ object HostStates {
 }
 internal class DiPlayEngineHooks(private val app: Context) : CarPlayEngineHooks {
     override fun hasSession(): Boolean = CarPlayHostIntegration.hasSession()
-    @Volatile private var pendingOpen: Application.ActivityLifecycleCallbacks? = null
+    @Volatile private var pendingOpen: CarPlayForegroundGate.Request? = null
     private fun cancelPendingOpen() {
-        pendingOpen?.let { (app as Application).unregisterActivityLifecycleCallbacks(it) }
+        pendingOpen?.cancel()
         pendingOpen = null
     }
     override fun stopSession(completion: () -> Unit) {
@@ -131,34 +129,18 @@ internal class DiPlayEngineHooks(private val app: Context) : CarPlayEngineHooks 
         // The host recognises a wired iPhone from the attach action and device extra and forces
         // wired (CarPlayHostActivity.isIphoneUsbAttachment; DIPLAY.md §2.4).
         usbAttach?.let { host.action = it.action; it.extras?.let(host::putExtras) }
-        // Android silently drops an activity start from an app with no visible window (background
-        // launch rules, Android 10+), e.g. an iPhone already plugged in while CarLink's process is
-        // still starting. Open the host once one of CarLink's activities resumes.
         cancelPendingOpen() // only the newest start may open the screen
-        if (!inFront()) {
-            Log.i("CarLink-CarPlay", "CarLink not in front yet; opening CarPlay when it resumes")
-            val application = app as Application
-            pendingOpen = object : Application.ActivityLifecycleCallbacks {
-                override fun onActivityResumed(activity: Activity) {
-                    application.unregisterActivityLifecycleCallbacks(this)
-                    if (pendingOpen === this) pendingOpen = null
-                    runCatching { activity.startActivity(host) }
-                        .onFailure { Log.w("CarLink-CarPlay", "deferred CarPlay open failed: ${it.javaClass.simpleName}") }
-                }
-                override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) = Unit
-                override fun onActivityStarted(activity: Activity) = Unit
-                override fun onActivityPaused(activity: Activity) = Unit
-                override fun onActivityStopped(activity: Activity) = Unit
-                override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) = Unit
-                override fun onActivityDestroyed(activity: Activity) = Unit
-            }.also { application.registerActivityLifecycleCallbacks(it) }
-            return null
+        if (Build.VERSION.SDK_INT < 29) return runCatching { app.startActivity(host) }.exceptionOrNull()
+        // Android 10+ still requires a real foreground caller. Keep this request until an own
+        // Activity resumes, or use one already resumed; never force a boot/background launch.
+        var immediate = true
+        var failure: Throwable? = null
+        pendingOpen = CarPlayForegroundGate.request(app as Application) { activity ->
+            val error = runCatching { activity.startActivity(host) }.exceptionOrNull()
+            if (immediate) failure = error
+            else if (error != null) Log.w("CarLink-CarPlay", "deferred CarPlay open failed: ${error.javaClass.simpleName}")
         }
-        return runCatching { app.startActivity(host) }.exceptionOrNull()
+        immediate = false
+        return failure
     }
-
-    // Only the caller's own processes are listed; IMPORTANCE_FOREGROUND is a resumed activity.
-    private fun inFront(): Boolean = Build.VERSION.SDK_INT < 29 ||
-        app.getSystemService(ActivityManager::class.java)?.runningAppProcesses.orEmpty()
-            .any { it.importance == ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND }
 }

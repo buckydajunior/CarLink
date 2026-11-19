@@ -13,7 +13,7 @@ object Connection {
     fun get(context: Context): SessionManager = instance ?: synchronized(this) {
         instance ?: create(context.applicationContext).also { instance = it }
     }
-    fun onHomeShown(context: Context) = UsbWatcher.get(context).start()
+    fun onHomeShown(context: Context) = UsbWatcher.get(context).onHomeShown()
 
     private fun create(app: Context) = SessionManager(
         adapter = CarPlayAdapter(app),

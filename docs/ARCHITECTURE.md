@@ -1,4 +1,4 @@
-> **F-150 fork, version 1.2.1:** the current product has `:app` (clock/status, settings, music EQ,
+> **F-150 fork, version 1.2.2:** the current product has `:app` (clock/status, settings, music EQ,
 > About and log export), `:carlink-core` (one USB CarPlay session, USB routing/wake/reset,
 > display policy, per-renderer music PCM equalization and timing history),
 > and DiPlay's `:carplay-common` / `:carplay-shared` engine. Android Auto and the generic wireless,
@@ -12,6 +12,15 @@ updates are attached to the view lifecycle; authentication does not wait for Com
 permission, VPN and missing-auth recovery. Android's mandatory launch window stays blank and brief.
 `SystemBarPreferences` writes DiPlay's original hide-top/hide-bottom keys independently; the host
 re-reads them and applies its existing window-inset logic on resume.
+
+Startup/wake discovery in `UsbWatcher` performs an immediate scan plus a bounded 30-second
+enumeration window, canceled once a phone is listed. A wake or visible Home may recover a
+previously handled inactive session through `SessionManager.onUsbReady`; scan-sourced discovery
+respects manual Disconnect, including notification Disconnect. Real USB attach keeps its own
+existing re-enumeration guard. `CarPlayForegroundGate` is installed before discovery, tracks
+resumed Activities with weak references and gives each deferred launch a cancelable generation.
+An already-resumed Activity can launch projection without waiting for another resume callback.
+Fully background Android 10+ startup remains deferred until an allowed foreground entry.
 Projection retains the separate `.carplay` task but is excluded from Recents by the app manifest.
 Home supplies the visible app card. Keeping separate affinities prevents Home's `singleTask`
 settings launch from clearing/destroying the projection activity above it in a shared task.

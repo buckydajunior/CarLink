@@ -30,6 +30,17 @@ video stream from ending the live CarPlay session. Genuine EOF/errors from the c
 still trigger normal session teardown. This fixes a reproducible engine race; a log from the
 head unit is needed to establish whether it caused a particular rare interruption.
 
+The 1.2.2 startup patch scans immediately, then briefly rescans while the USB controller comes up
+(at 0.5/1.5/3/5/10/20/30 seconds, stopping as soon as a phone is found). Boot/ACC wake or opening
+Home can retry an inactive, already-listed phone without a physical replug. Working sessions and
+manual Disconnect remain protected. A lifecycle gate uses an actual resumed app Activity rather
+than a potentially late process-importance snapshot; canceled or superseded launches are discarded.
+
+On Android 10+, a fully background app still needs an allowed foreground launch. If F-150 CarPlay
+does not open with the tablet, use the Linkswell launcher's startup-app option if it provides one.
+The app does not bypass [Android's background-start restrictions](https://developer.android.com/guide/components/activities/secure-bal)
+or automatically approve USB/VPN/microphone consent.
+
 ## Removed
 
 Android Auto's engine/native libraries and module dependencies, generic Bluetooth/Wi-Fi/hotspot
@@ -51,9 +62,11 @@ If Android asks which app should handle USB, select **F-150 CarPlay**. Its packa
 
 Test cold startup, quick replug, phone left connected across ignition, Siri/calls/music,
 steering-wheel controls, reverse-camera return, icon sizes, all four bar combinations and EQ
-on/off/music balance while navigation or calls play. **These have not yet been verified
-on this user's Linkswell.** Settings > Share connection log exports `WIRED_TIMING` and app events
-for measuring plug-to-first-frame latency. No on-car speed is claimed from unit tests.
+on/off/music balance while navigation or calls play. The user has run v1.2.0 and reported rare
+automatic reconnects and startup sometimes requiring a replug. **The fixes and full hardware test
+matrix still need validation on the Linkswell.** Settings > Share connection log exports
+`WIRED_TIMING`, boot/wake/USB readiness and app events for diagnosis. No on-car speed is claimed
+from unit tests.
 
 ## Build
 
