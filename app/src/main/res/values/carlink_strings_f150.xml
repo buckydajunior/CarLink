@@ -44,8 +44,8 @@
     <string name="carlink_f150_eq_body">Adjust CarPlay music while it plays. Navigation, calls and Siri keep their original sound.</string>
     <string name="carlink_f150_eq_enable">Enable equalizer</string>
     <string name="carlink_f150_call_audio">Call audio</string>
-    <string name="carlink_f150_call_echo">Software echo cancellation</string>
-    <string name="carlink_f150_call_echo_body">Helps prevent the other person from hearing their own voice through your microphone. On by default for this truck. Switch it off if your voice sounds worse.</string>
+    <string name="carlink_f150_call_echo">Experimental echo cancellation</string>
+    <string name="carlink_f150_call_echo_body">Experimental call processing, off by default. It may reduce voice quality. Leave it off to use the tablet’s available call processing.</string>
     <string name="carlink_f150_call_echo_apply">After changing this, unplug and reconnect your iPhone. Off uses the tablet’s available call processing. If echo or delay continues, share a connection log after a call.</string>
     <string name="carlink_f150_eq_reset">Reset to flat</string>
     <string name="carlink_f150_eq_headroom">Boosts reserve headroom to reduce distortion, so the overall volume may decrease.</string>

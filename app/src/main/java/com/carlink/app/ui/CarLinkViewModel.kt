@@ -169,6 +169,7 @@ class CarLinkViewModel(application: Application) : AndroidViewModel(application)
                 ConnectionLog.export(app, "F-150 Lariat / Linkswell / USB CarPlay\n" +
                     "Version ${BuildConfig.VERSION_NAME}; Android ${android.os.Build.VERSION.RELEASE}\n" +
                     "Device ${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}; CarPlay width ${_carPlayWidth.value} mm\n" +
+                    "Reported microphone: external, plugged into Linkswell\n" +
                     "Software call echo cancellation requested: ${_callEchoCancellation.value}")
             }
             val label = app.getString(R.string.carlink_f150_share_log)

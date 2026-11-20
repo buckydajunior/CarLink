@@ -25,22 +25,24 @@ state when Reset to flat is pressed. Each audio renderer has independent filter 
 short crossfades on changes and automatic headroom for boosts. Stable Off/flat leaves PCM bytes
 unchanged. Unsupported formats bypass it; no global/system equalizer or new audio buffers are used.
 
-Settings > Call audio controls the engine's existing software echo canceller. Version 1.2.3 enables
-it once on install/upgrade for this truck; later restarts preserve an Off choice. Unplug/reconnect
-after changing it. Matching mono call audio uses the speaker reference; unsupported/failed software
-processing keeps/restores Android's available call effects. Software and platform AEC are not
-deliberately stacked. This targets the other person's voice echoing back through the microphone;
-it does not establish the cause of every kind of feedback. Music EQ still bypasses calls.
+Settings > Call audio exposes the engine's experimental software echo canceller. It is **Off by
+default** in 1.2.4. A one-time migration turns off the default enabled by 1.2.3 without changing
+display/music preferences; later explicit opt-ins remain under the driver's control. Unplug and
+reconnect after changing the setting. Matching mono call audio can use the speaker reference;
+unsupported/failed software processing keeps/restores Android's available call effects. Software
+and platform AEC are not deliberately stacked. Music EQ still bypasses calls.
 
-Calls now read one microphone packet frame at a time and use a sample-rate-based playback start
-threshold, respecting Android's minimum buffer. Android 12+ receives a native start-threshold
-request; older devices or a failed request use a two-window effective buffer, keeping the original
-allocation. Rejected adjustments retain the working track and are logged. This removes fixed
-byte-count batching that grew longer at lower call sample rates. The call policy follows original
-telephony identity even when audio is routed as media; music, Siri and navigation buffering stay unchanged. Exported call-start
-diagnostics identify the requested frame/read sizes and actual software/platform effect states.
-These are code-level latency changes; end-to-end call delay and acoustic suppression need testing
-on the Linkswell.
+The external-microphone test on this Linkswell found that software AEC made voices muffled/robotic
+or distorted without fixing the caller hearing their own voice. Turning it Off and reconnecting
+restored the previous voice quality, while the original echo remained. This isolates the new
+quality regression to that processing mode; it does not establish the cause of the original echo.
+A call log with AEC Off is needed before selecting another processing or routing change.
+
+The 1.2.3 call-buffer policy remains: one microphone packet frame per read, an application start
+threshold based on rate/device minimum, and an Android 12+ native start-threshold request or
+older-device effective-buffer fallback. The user's A/B comparison did not implicate these buffer
+changes. Actual accepted sizes/effects/rates are exported; end-to-end delay has not been measured,
+and a separate delay was not confirmed beyond the repeated echo.
 
 The 1.2.1 stability patch prevents a late close callback from a replaced or explicitly retired
 video stream from ending the live CarPlay session. Genuine EOF/errors from the current stream
@@ -80,9 +82,10 @@ If Android asks which app should handle USB, select **F-150 CarPlay**. Its packa
 Test cold startup, quick replug, phone left connected across ignition, Siri/calls/music,
 steering-wheel controls, reverse-camera return, icon sizes, all four bar combinations and EQ
 on/off/music balance while navigation or calls play. The user reports that v1.2.2 startup works
-well, and has now reported call feedback/possible delay. The cause of the earlier rare automatic
-reconnects is still unconfirmed. **The call changes and full hardware test matrix need validation
-on the Linkswell.** Settings > Share connection log exports
+well. The caller hears their own voice through an external microphone plugged into the Linkswell.
+The 1.2.3 software AEC trial worsened voice quality; Off restored it without resolving echo.
+The cause of the earlier rare automatic reconnects is still unconfirmed. **The original call echo
+and full hardware test matrix need diagnosis/validation on the Linkswell.** Settings > Share connection log exports
 `WIRED_TIMING`, boot/wake/USB readiness and app events for diagnosis. No on-car speed is claimed
 from unit tests.
 

@@ -28,11 +28,12 @@ object F150Profile {
             AirPlayPersistence.savePhysicalSizeBasis(context, AirPlayPhysicalSizeBasis.WIDTH)
             prefs.edit().putBoolean("installed", true).apply()
         }
-        // Earlier F-150 builds did not expose this setting and used platform AEC only.
-        // Upgrade them too, without resetting display/EQ preferences or a subsequent Off choice.
-        if (!prefs.getBoolean("call_echo_default_installed", false)) {
-            AirPlayPersistence.saveCallEchoCancellation(context, true)
-            prefs.edit().putBoolean("call_echo_default_installed", true).apply()
+        // The software AEC trial degraded this truck's external-mic calls without curing echo.
+        // Reset it once on fresh installs and upgrades, including an enabled 1.2.3 preference.
+        // Later explicit experimental opt-ins remain under the driver's control.
+        if (!prefs.getBoolean("platform_call_audio_default_installed", false)) {
+            AirPlayPersistence.saveCallEchoCancellation(context, false)
+            prefs.edit().putBoolean("platform_call_audio_default_installed", true).apply()
         }
     }
 }

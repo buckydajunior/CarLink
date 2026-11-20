@@ -34,9 +34,9 @@ class F150ProfileTest {
         assertEquals(120, AirPlayPersistence.loadWidthPhysicalMm(app))
     }
 
-    @Test fun freshInstallEnablesSoftwareCallEchoCancellation() {
+    @Test fun freshInstallUsesPlatformCallProcessing() {
         F150Profile.install(app)
-        assertTrue(AirPlayPersistence.loadCallEchoCancellation(app))
+        assertFalse(AirPlayPersistence.loadCallEchoCancellation(app))
     }
 
     @Test fun existingInstallGetsCallDefaultWithoutResettingDisplay() {
@@ -45,7 +45,7 @@ class F150ProfileTest {
         AirPlayPersistence.saveWidthPhysicalMm(app, 120)
         AirPlayPersistence.saveCallEchoCancellation(app, false)
         F150Profile.install(app)
-        assertTrue(AirPlayPersistence.loadCallEchoCancellation(app))
+        assertFalse(AirPlayPersistence.loadCallEchoCancellation(app))
         assertEquals(120, AirPlayPersistence.loadWidthPhysicalMm(app))
     }
 
@@ -54,5 +54,22 @@ class F150ProfileTest {
         AirPlayPersistence.saveCallEchoCancellation(app, false)
         F150Profile.install(app)
         assertFalse(AirPlayPersistence.loadCallEchoCancellation(app))
+    }
+
+    @Test fun upgradingFrom123TurnsOffItsEnabledDefaultWithoutResettingDisplay() {
+        app.getSharedPreferences("f150_profile", Application.MODE_PRIVATE).edit()
+            .putBoolean("installed", true).putBoolean("call_echo_default_installed", true).commit()
+        AirPlayPersistence.saveWidthPhysicalMm(app, 120)
+        AirPlayPersistence.saveCallEchoCancellation(app, true)
+        F150Profile.install(app)
+        assertFalse(AirPlayPersistence.loadCallEchoCancellation(app))
+        assertEquals(120, AirPlayPersistence.loadWidthPhysicalMm(app))
+    }
+
+    @Test fun laterRestartsRespectAnExplicitExperimentalOptIn() {
+        F150Profile.install(app)
+        AirPlayPersistence.saveCallEchoCancellation(app, true)
+        F150Profile.install(app)
+        assertTrue(AirPlayPersistence.loadCallEchoCancellation(app))
     }
 }
