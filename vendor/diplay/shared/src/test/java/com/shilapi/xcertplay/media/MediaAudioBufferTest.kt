@@ -23,13 +23,41 @@ class MediaAudioBufferTest {
     }
 
     @Test
-    fun `calls and prompts keep the low-latency buffer`() {
+    fun `non telephony prompts retain the existing buffer`() {
         val plan = MediaAudioBuffer.plan(false, 16_000, 1, minBufferBytes = 1_280, mediaMillis = 1000)
         assertEquals(4 * 1024, plan.startBytes)
         assertEquals(16 * 1024, plan.trackBufferBytes)
         val guidance = AudioChannelMapper.map("default", 100, AudioChannelMappingMode.AUTOMOTIVE_BUS)
         assertEquals(plan, MediaAudioBuffer.plan(guidance.channel == AudioChannel.MEDIA,
             16_000, 1, minBufferBytes = 1_280, mediaMillis = 1000))
+    }
+
+    @Test fun `telephony starts after twenty milliseconds or the device minimum`() {
+        for (rate in listOf(8_000, 16_000, 48_000)) for (channels in listOf(1, 2)) {
+            val packet = rate * channels * 2 / 50
+            val plan = MediaAudioBuffer.plan(false, rate, channels, 128, 1000, isTelephony = true)
+            assertEquals(packet, plan.startBytes)
+            assertEquals(16 * 1024, plan.trackBufferBytes) // Retain capacity; shorten only the initial batch.
+            assertEquals(packet * 2, MediaAudioBuffer.plan(false, rate, channels, packet * 2, 1000,
+                isTelephony = true).startBytes)
+        }
+    }
+
+    @Test fun `routing telephony as media never adds the music buffer`() {
+        val call = MediaAudioBuffer.plan(true, 16_000, 1, 128, 1000, isTelephony = true)
+        assertEquals(640, call.startBytes)
+        assertEquals(16 * 1024, call.trackBufferBytes)
+        // Navigation, Siri and music keep the existing defaults when no telephony type is supplied.
+        assertEquals(4096, MediaAudioBuffer.plan(false, 16_000, 1, 128, 1000).startBytes)
+        assertEquals(32_000, MediaAudioBuffer.plan(true, 16_000, 1, 128, 1000).startBytes)
+    }
+
+    @Test fun `call write chunks fit smaller granted tracks and stay pcm frame aligned`() {
+        assertEquals(640, MediaAudioBuffer.callWriteChunkBytes(16_000, 1, 16_384))
+        assertEquals(128, MediaAudioBuffer.callWriteChunkBytes(16_000, 1, 256))
+        assertEquals(2, MediaAudioBuffer.callWriteChunkBytes(16_000, 1, 2))
+        assertEquals(640, MediaAudioBuffer.callWriteChunkBytes(16_000, 1, 0))
+        assertEquals(440, MediaAudioBuffer.callWriteChunkBytes(11_025, 1, 16_384))
     }
 
     @Test

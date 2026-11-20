@@ -2,7 +2,6 @@ package com.carlink.core.entry
 
 import android.app.Activity
 import android.content.Intent
-import android.hardware.usb.UsbConstants
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.os.Build
@@ -11,11 +10,13 @@ import android.util.Log
 import com.carlink.core.core.PhoneKind
 import com.carlink.core.detect.PhoneClassifier
 import com.carlink.core.connection.Connection
+import com.carlink.core.connection.CarLinkCore
+import com.carlink.core.connection.CarLinkHost
 
 /**
  * CarLink's only USB_DEVICE_ATTACHED handler (both engines' filters are removed from the merged
- * manifest). Accepting the system prompt here grants USB access to the whole package, so both
- * engine processes can open the phone. Peripherals are ignored without showing anything.
+ * manifest). Accepting the system prompt here grants USB access to the whole package, so the
+ * CarPlay engine can open the phone. Peripherals are ignored without showing anything.
  */
 class UsbRouterActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -37,14 +38,17 @@ class UsbRouterActivity : Activity() {
         Log.i(TAG, "USB ${"%04x:%04x".format(device.vendorId, device.productId)} -> $kind")
         com.carlink.core.diagnostics.EventLog.add("USB", "${"%04x:%04x".format(device.vendorId, device.productId)} -> $kind")
         if (kind == PhoneKind.UNKNOWN) return
+        val session = Connection.get(this)
+        // A cold attach may already be claimed by Application's watcher, with preflight blocked
+        // or projection waiting for an Activity to resume. Open Home while this system launch
+        // allows it, but never cover an existing host during the engine's USB re-enumeration.
+        if (session.needsHostUi()) CarLinkCore.config.host.openHome(this, CarLinkHost.OpenReason.USB_ATTACHED)
         if (!UsbWatcher.get(this).claim(device)) {
             Log.i(TAG, "USB attach already routed by the watcher")
             return
         }
-        val name = com.carlink.core.detect.UsbPhoneNames.resolve(this, kind, device)
-        // The attach intent carries the UsbDevice: DiPlay reads it for a wired iPhone, and the
-        // Android Auto engine switches that exact phone to accessory mode.
-        Connection.get(this).onUsbPhone(kind, name, intent)
+        // The attach intent carries the UsbDevice: DiPlay reads it for a wired iPhone, and the engine can find that exact device.
+        session.onUsbPhone(kind, "iPhone", intent)
     }
 
     companion object {
@@ -60,16 +64,6 @@ class UsbRouterActivity : Activity() {
         fun describe(device: UsbDevice) = PhoneClassifier.UsbDeviceInfo(
             vendorId = device.vendorId,
             productId = device.productId,
-            interfaces = (0 until device.interfaceCount).map { index ->
-                val usbInterface = device.getInterface(index)
-                PhoneClassifier.UsbInterfaceInfo(
-                    interfaceClass = usbInterface.interfaceClass,
-                    subclass = usbInterface.interfaceSubclass,
-                    protocol = usbInterface.interfaceProtocol,
-                    hasBulkEndpoint = (0 until usbInterface.endpointCount)
-                        .any { usbInterface.getEndpoint(it).type == UsbConstants.USB_ENDPOINT_XFER_BULK },
-                )
-            },
             productName = runCatching { device.productName }.getOrNull(),
         )
     }

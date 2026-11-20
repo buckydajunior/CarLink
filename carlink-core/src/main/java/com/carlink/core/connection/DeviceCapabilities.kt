@@ -159,11 +159,8 @@ data class DeviceCapabilities(
             ).also { signalsCache = it }
         }
 
-        /** Forgets the cached signals, so the next [signals] re-reads them (after [GpuProbe] learned the GPU). */
-        internal fun invalidateSignals() { signalsCache = null }
-
         /** Drops the decoder probe (memory pressure); the next session start probes again. */
-        fun trimCaches() { cache = null }
+        @Synchronized fun trimCaches() { cache = null }
 
         /** The fastest core's `cpuinfo_max_freq` in MHz, 0 when sysfs is not readable. */
         private fun cpuMaxMhz(): Int = runCatching {
@@ -180,19 +177,25 @@ data class DeviceCapabilities(
          */
         fun read(context: Context): DeviceCapabilities {
             val panel = panelSize(context)
+            return cached(panel) {
+                val sizes = PicturePolicy.probeSizes(panel)
+                val started = android.os.SystemClock.uptimeMillis()
+                val list = runCatching { MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos.toList() }.getOrDefault(emptyList())
+                val capabilities = DeviceCapabilities(
+                    panel = panel,
+                    signals = signals(context),
+                    h264 = probe(list, MediaFormat.MIMETYPE_VIDEO_AVC, sizes),
+                    h265 = probe(list, MediaFormat.MIMETYPE_VIDEO_HEVC, sizes),
+                )
+                Log.i(TAG, "probed in ${android.os.SystemClock.uptimeMillis() - started} ms: $capabilities")
+                capabilities
+            }
+        }
+
+        /** Startup warm-up and a USB start share one codec scan instead of probing concurrently. */
+        @Synchronized internal fun cached(panel: VideoSize, load: () -> DeviceCapabilities): DeviceCapabilities {
             cache?.takeIf { it.panel == panel }?.let { return it }
-            val sizes = PicturePolicy.probeSizes(panel)
-            val started = android.os.SystemClock.uptimeMillis()
-            val list = runCatching { MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos.toList() }.getOrDefault(emptyList())
-            val capabilities = DeviceCapabilities(
-                panel = panel,
-                signals = signals(context),
-                h264 = probe(list, MediaFormat.MIMETYPE_VIDEO_AVC, sizes),
-                h265 = probe(list, MediaFormat.MIMETYPE_VIDEO_HEVC, sizes),
-            )
-            Log.i(TAG, "probed in ${android.os.SystemClock.uptimeMillis() - started} ms: $capabilities")
-            cache = capabilities
-            return capabilities
+            return load().also { cache = it }
         }
 
         @Suppress("DEPRECATION") // getRealMetrics is the API-25-compatible way to read the panel.
@@ -224,7 +227,7 @@ data class DeviceCapabilities(
                 name.contains(".sw.") || name.contains("software"))
         }
 
-        /** DiAuto's `DecoderCapabilityReport.adequate`, with an empty performance-point list read as "not declared". */
+        /** An empty performance-point list means "not declared", not unsupported. */
         private fun adequate(video: MediaCodecInfo.VideoCapabilities, size: VideoSize, fps: Int): Boolean {
             val sizeOk = runCatching { video.isSizeSupported(size.width, size.height) }.getOrDefault(false)
             if (!sizeOk) return false

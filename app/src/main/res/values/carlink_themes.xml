@@ -11,5 +11,8 @@
     </style>
 
     <!-- Launch theme: same background as the first frame, so there is no flash. -->
-    <style name="Theme.CarLink.Starting" parent="Theme.CarLink" />
+    <style name="Theme.CarLink.Starting" parent="Theme.CarLink">
+        <item name="android:windowBackground">@color/carlink_idle_background</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
 </resources>

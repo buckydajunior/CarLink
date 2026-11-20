@@ -20,9 +20,9 @@ class UiPreferencesTest {
     @Test fun uiPreferencesDefaults() {
         val prefs = UiPreferences(app)
         assertEquals(ThemeMode.FOLLOW_SYSTEM, prefs.themeMode)
-        assertEquals(UiProfileMode.AUTO, prefs.uiProfileMode)
-        assertEquals(1f, prefs.interfaceScale)
-        assertTrue(prefs.interfaceScale in UiPreferences.INTERFACE_SCALES)
+        assertEquals(UiProfileMode.CAR, prefs.uiProfileMode)
+        assertEquals(1.15f, prefs.interfaceScale)
+        assertEquals(com.carlink.app.ui.theme.RenderingMode.LITE, prefs.renderingMode)
     }
 
     @Test fun uiPreferencesPersistAcrossInstances() {
@@ -42,6 +42,6 @@ class UiPreferencesTest {
         app.getSharedPreferences("carlink", Context.MODE_PRIVATE).edit()
             .putString("theme_mode", "SEPIA").putString("ui_profile_mode", "WATCH").commit()
         assertEquals(ThemeMode.FOLLOW_SYSTEM, UiPreferences(app).themeMode)
-        assertEquals(UiProfileMode.AUTO, UiPreferences(app).uiProfileMode)
+        assertEquals(UiProfileMode.CAR, UiPreferences(app).uiProfileMode)
     }
 }

@@ -32,5 +32,9 @@ object RenderingPolicy {
     /** What Automatic resolves to on this device. */
     fun autoIsLite(context: Context): Boolean = DeviceCapabilities.signals(context).liteRendering
 
-    fun lite(context: Context, mode: RenderingMode): Boolean = lite(mode, DeviceCapabilities.signals(context))
+    fun lite(context: Context, mode: RenderingMode): Boolean = when (mode) {
+        RenderingMode.LITE -> true
+        RenderingMode.FULL -> false
+        RenderingMode.AUTO -> autoIsLite(context)
+    }
 }

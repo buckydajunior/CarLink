@@ -8,1084 +8,354 @@ import android.util.Log
 import com.carlink.core.core.Engine
 import com.carlink.core.core.PhoneKind
 import com.carlink.core.core.Transport
-import com.carlink.core.settings.WirelessPath
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.util.concurrent.Executor
 
-/** One session the driver or a trigger asked for. */
-data class SessionRequest(
-    val engine: Engine,
-    val transport: Transport,
-    val phoneAddress: String?,
-    val phoneName: String?,
-    val usbAttach: Intent? = null,
-    /**
-     * Experimental: Android Auto runs on this screen itself (DiAuto's Self Mode against Android
-     * Auto's head unit server, 127.0.0.1:5277); no phone, no Bluetooth, no wireless path.
-     * Carried as [Transport.WIRELESS] with no path, so USB unplug rules never end it.
-     */
-    val selfMode: Boolean = false,
-)
-
-/** Something that must be fixed before a session can start; each has a one-tap fix in the UI. */
-enum class Problem {
-    BLUETOOTH_OFF,
-    PHONE_NOT_PAIRED,
-    WIFI_OFF,
-    LOCATION_OFF,
-    PERMISSIONS,
-    OVERLAY,
-    VPN_CONSENT,
-    CARPLAY_AUTH_MISSING,
-    NO_IPHONE_SELECTED,
-    /** Same Wi-Fi: no saved network, or no password for a secured one. */
-    SAME_WIFI_DETAILS,
-    /** Same Wi-Fi: this device is not on the saved network (another one, none, or two at once). */
-    SAME_WIFI_NOT_JOINED,
-    CAR_HOTSPOT_DETAILS,
-    CAR_HOTSPOT_OFF,
-    /**
-     * Wireless only: this stereo's Bluetooth is an external module the app cannot reach
-     * ([SessionManager.Environment.wirelessUnavailable] for the engine); USB works. No one-tap fix.
-     */
-    EXTERNAL_BLUETOOTH,
-    /** Android 16+ lost this phone's Bluetooth key (`ACTION_KEY_MISSING`): pair again. See detect/PairingLoss. */
-    PAIRING_LOST,
+data class SessionRequest(val phoneName: String? = null, val usbAttach: Intent? = null) {
+    val engine: Engine get() = Engine.CARPLAY
+    val transport: Transport get() = Transport.USB
 }
-
-
-/** What CarLink shows. Exactly one session exists at a time. */
+enum class Problem { PERMISSIONS, VPN_CONSENT, CARPLAY_AUTH_MISSING }
 sealed interface SessionState {
     data object Idle : SessionState
-
-    /** The request cannot start until the driver fixes [problems]. */
     data class Blocked(val request: SessionRequest, val problems: List<Problem>) : SessionState
-
-    data class Active(
-        val request: SessionRequest,
-        val path: WirelessPath?,
-        /** 1 for the first path, 2+ while trying the next path after a path-related failure. */
-        val attempt: Int,
-        val phase: Phase,
-        /** Why the current phase takes long, or what the stall watchdog is doing about it; null while on time. */
-        val notice: Notice? = null,
-    ) : SessionState
-
-    data class Failed(
-        val request: SessionRequest,
-        val path: WirelessPath?,
-        val reason: FailureReason,
-        val detail: String?,
-        /** The step the attempt was on when it failed (Home names it); null when it never started. */
-        val stage: ProgressStage? = null,
-    ) : SessionState
-
+    data class Active(val request: SessionRequest, val attempt: Int, val phase: Phase, val notice: Notice? = null) : SessionState
+    data class Failed(val request: SessionRequest, val reason: FailureReason, val detail: String?, val stage: ProgressStage? = null) : SessionState
     sealed interface Phase {
         data object Starting : Phase
         data class Progress(val step: Int, val stepCount: Int, val stage: ProgressStage) : Phase
-        /**
-         * Retrying after [reason], on the [stage] it happened in (not back to the start), with
-         * [detail] in the driver's words ("the iPhone did not answer over Bluetooth").
-         */
-        data class Retrying(
-            val attempt: Int,
-            val reason: FailureReason,
-            val stage: ProgressStage = ProgressStage.WAITING_FOR_PHONE,
-            val detail: String? = null,
-        ) : Phase
+        data class Retrying(val attempt: Int, val reason: FailureReason, val stage: ProgressStage = ProgressStage.WAITING_FOR_PHONE,
+            val detail: String? = null) : Phase
         data object Connected : Phase
     }
-
-    val engine: Engine?
-        get() = when (this) {
-            Idle -> null
-            is Blocked -> request.engine
-            is Active -> request.engine
-            is Failed -> request.engine
-        }
-
-    /** A session is running or being set up (not idle, blocked or failed). */
+    val engine: Engine? get() = if (this == Idle) null else Engine.CARPLAY
     val isActive: Boolean get() = this is Active
 }
-
-/** A phase is late: what the driver is told, and the recovery under way ([action]). */
-data class Notice(
-    val kind: Kind,
-    val stage: ProgressStage?,
-    val message: String,
-    val action: RecoveryAction? = null,
-) {
-    enum class Kind {
-        /** Still waiting for the phone after [AdaptiveDeadlines.HINT_MILLIS] (or its deadline). */
-        PHONE_NOT_ANSWERING,
-        /** A later phase is past [AdaptiveDeadlines.HINT_MILLIS] but not yet past its deadline. */
-        SLOW,
-        /** A phase passed its deadline and the watchdog applied [Notice.action]. */
-        RECOVERING,
-    }
+data class Notice(val kind: Kind, val stage: ProgressStage?, val message: String, val action: RecoveryAction? = null) {
+    enum class Kind { PHONE_NOT_ANSWERING, SLOW, RECOVERING }
 }
 
-/**
- * The one place that runs sessions (design/REBUILD_V2.md §4). Main process, main thread.
- *
- * Rules, each from a failure seen on a real device or in the engine dissections:
- * - One engine at a time; a new session starts only after the previous one's stop completed
- *   (DP F14: starting early let the old teardown stop the new session's service).
- * - Wireless paths come from [WirelessPolicy], re-ordered by this phone's record
- *   ([ConnectionProfiles.rankPaths]); only a path-related failure moves to the next path, and the
- *   path that connected is remembered per phone.
- * - Automatic starts never interrupt a running session and respect the driver's pause.
- * - USB re-enumeration during a USB session is the engine's business, not a new session; a USB
- *   session ends when its phone stays unplugged past the engines' own re-enumeration.
- * - No silent waits (docs/RELIABILITY_AUDIT_2026-10-09.md K2, K4): each phase has a deadline
- *   learnt from this phone ([AdaptiveDeadlines]); the driver is told why it waits after at most
- *   [AdaptiveDeadlines.HINT_MILLIS], and a phase past its deadline gets the next recovery from
- *   [StallPlaybook] (nudge, USB re-switch, retry, fresh Wi-Fi Direct, next path, re-plug, fail).
- */
+/** One wired session: never reopen before teardown completes, never restart on USB re-enumeration. */
 class SessionManager(
-    private val adapters: Map<Engine, EngineAdapter>,
+    private val adapter: EngineAdapter,
     private val environment: Environment,
-    /** Writes the session's settings into the engine; may block (IPC to ":aa"). */
     private val applySettings: (SessionPlan) -> Unit,
-    /** Runs [applySettings] off the main thread, in order. */
     private val worker: Executor,
     private val main: Handler = Handler(Looper.getMainLooper()),
-    /** Per-phone history: path order, phase deadlines and [health]. */
     private val profiles: ConnectionProfiles = ConnectionProfiles(),
-    /** Monotonic time for phase durations and deadlines. */
     private val clock: () -> Long = SystemClock::uptimeMillis,
 ) {
-    /** Everything [SessionManager] reads from the device and the stored preferences. */
     interface Environment {
-        val autoConnectUsb: Boolean
-        val autoConnectBluetooth: Boolean
-        var autoConnectPaused: Boolean
-
-        /**
-         * True when wireless [engine] cannot start on this device: its Bluetooth is an external
-         * module the app cannot reach (detect/ExternalBluetoothProbe), and for Android Auto the
-         * driver did not opt into the module route (CarPlay has none). Wireless requests are then
-         * [Problem.EXTERNAL_BLUETOOTH] before any engine starts, and automatic wireless starts are
-         * skipped. USB is never affected.
-         */
-        fun wirelessUnavailable(engine: Engine): Boolean = false
-
-        /** Problems that prevent [request] on [path] (pre-flight; does not open anything). */
-        fun preflight(request: SessionRequest, path: WirelessPath?): List<Problem>
-        /** Wireless paths to try for [request], in order (see [WirelessPolicy]). */
-        fun wirelessPaths(request: SessionRequest): List<WirelessPath>
-        /** Remembers that [path] connected for [phoneAddress]. */
-        fun rememberWorkingPath(engine: Engine, phoneAddress: String, path: WirelessPath)
-        /**
-         * Remembers [phoneAddress] as the last phone, with its [name] and, when known for certain,
-         * its [kind]. A null [kind] keeps whatever type is stored (a tap is not proof of the type).
-         */
-        fun rememberPhone(phoneAddress: String, kind: PhoneKind?, name: String? = null)
-
-        /** The USB serial of the phone in [attach] (readable while CarLink has USB permission for it); null when unknown. */
+        fun preflight(request: SessionRequest): List<Problem>
         fun usbSerial(attach: Intent?): String? = null
-
-        /** How long the stereo's Bluetooth module may take to reach the phone for [request]; null when Android's radio is used. */
-        fun modulePhoneWaitMillis(request: SessionRequest): Long? = null
-
-        /** Known phones whose Bluetooth is connected to this stereo now (PhoneChoice); none where unknown. */
-        fun connectedPhones(): List<PhoneOption> = emptyList()
-
-        /** The phone the stereo's Bluetooth module reported for [engine]'s last link (address, name), if any. */
-        fun modulePhone(engine: Engine): Pair<String, String?>? = null
-        fun usbPhonePresent(engine: Engine): Boolean
-        /** The phone of a USB session was unplugged: bring CarLink's Home back in front. */
+        fun usbPhonePresent(): Boolean
         fun returnHome()
-        /** Called when an engine becomes engaged or none is (DiAuto's key receivers follow this). */
-        fun onEngaged(engine: Engine?)
         fun log(message: String)
-
-        /**
-         * Work that gives [request] a head start while the previous engine stops and the engine
-         * launches (wireless CarPlay: page the iPhone over Bluetooth, RELIABILITY_AUDIT K3). Calls
-         * [done] (any thread) when finished; returns false when it started nothing. The engine is
-         * not held for it: its own dial waits for the page ([BluetoothWarmup.awaitPage]).
-         */
-        fun warmUp(request: SessionRequest, done: () -> Unit): Boolean = false
-
-        /**
-         * The car hotspot is off and the driver asked CarLink to switch it on (Settings ›
-         * Connection, #36): try once. Calls [done] (any thread) with whether it came on; returns
-         * false when it cannot try.
-         */
-        fun turnOnCarHotspot(done: (Boolean) -> Unit): Boolean = false
     }
-
     private val _state = MutableStateFlow<SessionState>(SessionState.Idle)
     val state: StateFlow<SessionState> = _state.asStateFlow()
-
-    private val _pendingSwitch = MutableStateFlow<SessionRequest?>(null)
-
-    /** Bluetooth phones already offered during the current session (one offer each). */
-    private val offeredThisSession = mutableSetOf<String>()
-    /**
-     * A second phone was plugged in while another session runs: the driver is asked
-     * "Switch to <phone>?" (user decision, 2026-10-09) instead of it taking over by itself.
-     */
-    val pendingSwitch: StateFlow<SessionRequest?> = _pendingSwitch.asStateFlow()
-
-    /** Each known phone's connection health (success rate, time to picture, last problems). */
     val health: StateFlow<List<PhoneHealth>> get() = profiles.health
-
-    /** Increases with every new session or stop; events from older sessions are ignored. */
     private var token = 0
-    /** The request that already tried to switch the car hotspot on: once per start, not per re-check. */
-    private var hotspotTriedFor: SessionRequest? = null
-    private var running: Engine? = null
+    private var running = false
     private var stopping = 0
     private val afterStop = ArrayDeque<() -> Unit>()
-
-    /** carlink.log tags each session's lines `#s<n>`. */
     private var sessionId = 0
-    /** The engine attempt that currently reports; its events alone count. */
     private var attempt: Attempt? = null
-    private var nextAttemptId = 0
-    /** Recoveries used in this request, per (path index, phase); a null phase is the whole attempt. */
-    private val recoveries = mutableMapOf<Pair<Int, ProgressStage?>, Int>()
-    /** The current request has shown a picture at least once. */
+    private val recoveries = mutableMapOf<ProgressStage?, Int>()
     private var everConnected = false
-    /** [AdapterEvent.Stalled] restarts used by the current request ([MAX_QUICK_RETRIES]). */
     private var quickRetries = 0
-
-    /** When the driver last stopped a session (uptime); see [onUsbPhone]. */
     private var driverStoppedAt = -REENUMERATION_WINDOW_MILLIS
-    /** The engine of the USB session the driver last stopped; only its phone re-enumerates. */
-    private var driverStoppedUsbEngine: Engine? = null
-
-    /** One engine start on one path, with its phase clock. */
-    private class Attempt(
-        val request: SessionRequest,
-        val plan: SessionPlan,
-        val paths: List<WirelessPath?>,
-        val index: Int,
-        val id: Int,
-        now: Long,
-    ) {
-        /** Adapter start (or the last loss of the picture): the whole-attempt deadline counts from here. */
+    private var driverStoppedWithPhone = false
+    private var automaticStartPaused = false
+    private class Attempt(val request: SessionRequest, val plan: SessionPlan, now: Long) {
         var startedAt = now
         var stage = ProgressStage.WAITING_FOR_PHONE
         var stageSince = now
-        var step = 1
-        var stepCount = 4
-        /** Deadlines passed in the current phase. */
         var expiries = 0
         var hinted = false
         var totalFired = false
         var phoneSilent = false
         var connectedOnce = false
     }
-
-    /**
-     * Remembers a driver stop; only a USB session's stop makes its phone re-enumerate, and only
-     * when the phone was still plugged in. A phone that was already unplugged (tablet 2026-10-20:
-     * unplugged, Disconnect, plugged in again) is plugged in for real next time.
-     */
-    private fun markDriverStop(stopped: SessionState) {
-        val active = stopped as? SessionState.Active
-        driverStoppedUsbEngine = active?.request?.engine
-            ?.takeIf { active.request.transport == Transport.USB && environment.usbPhonePresent(it) }
-        driverStoppedAt = SystemClock.uptimeMillis()
-    }
-
     private val watchdog = Runnable { onWatchdog() }
-
     private val usbGoneCheck = Runnable {
-        val current = _state.value as? SessionState.Active ?: return@Runnable
-        if (current.request.transport != Transport.USB) return@Runnable
-        if (environment.usbPhonePresent(current.request.engine)) return@Runnable
-        note("USB phone for ${current.request.engine} unplugged; ending the session")
-        // Unplugging is the driver stopping: no automatic start right after (it started the
-        // last wireless phone instead on the tablet, 2026-10-09).
-        environment.autoConnectPaused = true
+        if (_state.value !is SessionState.Active) return@Runnable
+        if (environment.usbPhonePresent()) return@Runnable
+        note("USB iPhone unplugged; ending the session")
         stop()
         environment.returnHome()
     }
-
     init {
-        // A session nobody shows (e.g. Android Auto left running in ":aa" after this process
-        // restarted) is stopped: the driver must always see what runs (DA§10.6.1).
-        // One still showing a picture is the driver's projection, outliving a main process the
-        // system killed on a small stereo: it is kept, not cut off mid-drive (lifecycle audit #1).
-        adapters.values.filter { it.hasSession() }.forEach { adapter ->
+        if (adapter.hasSession()) {
             stopping++
-            adapter.whenOrphanKnown { projecting ->
-                main.post {
-                    if (projecting) {
-                        note("kept a running ${adapter.engine} session after a restart of this process")
-                        stopping--; drainAfterStop()
-                    } else {
-                        note("stopping an orphaned ${adapter.engine} session")
-                        adapter.stop { stopping--; drainAfterStop() }
-                    }
-                }
-            }
+            adapter.whenOrphanKnown { projecting -> main.post {
+                if (projecting) { note("kept a running CarPlay session after process restart"); stopping--; drainAfterStop() }
+                else adapter.stop { main.post { stopping--; drainAfterStop() } }
+            } }
         }
     }
-
-    // --- Triggers ------------------------------------------------------------------------------
-
-    /** A phone was plugged in. USB is a deliberate act, so it may replace a wireless session. */
     fun onUsbPhone(kind: PhoneKind, phoneName: String?, attach: Intent?) {
-        val engine = kind.engine ?: return
-        if (!environment.autoConnectUsb) return note("USB $engine phone: automatic USB start is off")
+        if (kind != PhoneKind.IPHONE) return
         val current = _state.value
-        // Both engines re-enumerate the phone on purpose while connecting (CarPlay's
-        // configuration switch, Android Auto's accessory switch); each is a new attach.
-        if (current is SessionState.Active && current.request.engine == engine && current.request.transport == Transport.USB) {
-            // A different phone (another serial) swapped onto the cable is not a re-enumeration:
-            // the driver is offered it, and the old phone's session ends when it is found gone.
-            val was = environment.usbSerial(current.request.usbAttach)
-            val now = environment.usbSerial(attach)
-            if (was != null && now != null && was != now) {
-                note("USB $engine phone with another serial during the $engine session; asking the driver")
-                _pendingSwitch.value = SessionRequest(engine, Transport.USB, null, phoneName, attach)
-                return
-            }
-            main.removeCallbacks(usbGoneCheck)
-            return note("USB re-attach during the $engine session; left to the engine")
-        }
-        // Stopping a USB session re-enumerates the phone too; that is not the driver plugging in.
-        // A real re-plug after stopping a wireless session (or the other phone) is honoured at once.
-        if (driverStoppedUsbEngine == engine && SystemClock.uptimeMillis() - driverStoppedAt < REENUMERATION_WINDOW_MILLIS) {
-            return note("USB $engine attach right after the driver stopped; not restarting")
-        }
-        val request = SessionRequest(engine, Transport.USB, null, phoneName, attach)
         if (current is SessionState.Active) {
-            // Plugging in the phone a wireless attempt of the same engine is still reaching is the
-            // driver choosing the cable: no question (RELIABILITY_AUDIT K14: 2.5-3 s and a tap).
-            // Only the same phone, by name where both sides know it: a passenger's phone plugged in to
-            // charge is a different phone and is offered instead (connection audit #6).
-            val sameName = phoneName == null || current.request.phoneName == null ||
-                phoneName.trim().equals(current.request.phoneName.trim(), ignoreCase = true)
-            if (current.request.engine == engine && current.request.transport == Transport.WIRELESS &&
-                current.phase != SessionState.Phase.Connected && sameName) {
-                note("USB $engine phone while the wireless $engine attempt is still connecting; switching to USB")
-                _pendingSwitch.value = null
-                return start(request)
+            val old = environment.usbSerial(current.request.usbAttach)
+            val new = environment.usbSerial(attach)
+            if (old != null && new != null && old != new) {
+                note("another iPhone replaced the cable; switching after teardown")
+                start(SessionRequest(phoneName, attach))
+            } else {
+                main.removeCallbacks(usbGoneCheck)
+                note("USB re-attach during CarPlay; left to the engine")
             }
-            note("USB $engine phone while a ${current.request.engine} session runs; asking the driver")
-            _pendingSwitch.value = request
             return
         }
-        start(request)
+        if (driverStoppedWithPhone && clock() - driverStoppedAt < REENUMERATION_WINDOW_MILLIS) {
+            note("USB re-attach after disconnect/failure; not restarting")
+            return
+        }
+        start(SessionRequest(phoneName, attach))
     }
-
-    /** The driver answered "Switch" to [pendingSwitch]. */
-    fun acceptSwitch() {
-        val request = _pendingSwitch.value ?: return
-        _pendingSwitch.value = null
-        environment.autoConnectPaused = false
-        start(request)
+    fun connectUsb(phoneName: String? = null, attach: Intent? = null) {
+        if (_state.value is SessionState.Active) return
+        start(SessionRequest(phoneName, attach))
     }
-
-    /** The driver answered "Not now": the running session stays; the phone waits until picked. */
-    fun declineSwitch() {
-        _pendingSwitch.value?.let { note("driver kept the ${_state.value.engine} session") }
-        _pendingSwitch.value = null
+    /** Wake/foreground scans can retry the same node without inventing a fresh USB attachment. */
+    fun onUsbReady(kind: PhoneKind, phoneName: String?, attach: Intent?): Boolean {
+        if (kind != PhoneKind.IPHONE) return false
+        if (_state.value is SessionState.Active) {
+            onUsbPhone(kind, phoneName, attach)
+            return true
+        }
+        if (automaticStartPaused) {
+            note("USB ready rescan; keeping the driver's disconnect")
+            return false
+        }
+        note("USB ready rescan; retrying the listed iPhone")
+        start(SessionRequest(phoneName, attach))
+        return true
     }
-
-    /** A USB device left. A USB session whose phone does not come back within the grace ends. */
+    /** A cold USB launch needs a screen; internal re-enumeration must leave an existing host visible. */
+    fun needsHostUi(): Boolean = _state.value is SessionState.Blocked || _state.value is SessionState.Failed || !adapter.hasSession()
     fun onUsbDetached() {
-        _pendingSwitch.value?.let { pending ->
-            main.postDelayed({
-                if (_pendingSwitch.value === pending && !environment.usbPhonePresent(pending.engine)) _pendingSwitch.value = null
-            }, USB_GONE_GRACE_MILLIS)
-        }
-        // A USB request that was blocked or failed belongs to the phone that left: once it stays
-        // unplugged, Home shows its normal screen again instead of the old problem.
         val shown = _state.value
-        val usbRequest = (shown as? SessionState.Blocked)?.request ?: (shown as? SessionState.Failed)?.request
-        if (usbRequest?.transport == Transport.USB) {
-            main.postDelayed({
-                if (_state.value === shown && !environment.usbPhonePresent(usbRequest.engine)) {
-                    note("USB phone for ${usbRequest.engine} unplugged; clearing its ${shown.javaClass.simpleName.lowercase()} state")
-                    stop()
-                }
-            }, USB_GONE_GRACE_MILLIS)
+        if (shown is SessionState.Blocked || shown is SessionState.Failed) {
+            main.postDelayed({ if (_state.value === shown && !environment.usbPhonePresent()) stop() }, USB_GONE_GRACE_MILLIS)
             return
         }
-        val current = shown as? SessionState.Active ?: return
-        if (current.request.transport != Transport.USB) return
+        val active = shown as? SessionState.Active ?: return
         main.removeCallbacks(usbGoneCheck)
-        // While connecting, the engines re-enumerate the phone on purpose; once projecting they do
-        // not, so an unplug then returns to Home almost at once (user request, 2026-10-09). A
-        // session that showed a picture and is now retrying is past its re-enumeration too (K15).
-        val grace = if (current.phase == SessionState.Phase.Connected || everConnected) USB_GONE_CONNECTED_GRACE_MILLIS
-            else USB_GONE_GRACE_MILLIS
-        main.postDelayed(usbGoneCheck, grace)
+        main.postDelayed(usbGoneCheck, if (active.phase == SessionState.Phase.Connected || everConnected)
+            USB_GONE_CONNECTED_GRACE_MILLIS else USB_GONE_GRACE_MILLIS)
     }
-
-    /** A paired phone's Bluetooth link came up. Never interrupts a running session. */
-    fun onBluetoothPhone(address: String, kind: PhoneKind, phoneName: String?) {
-        val engine = kind.engine ?: return
-        when {
-            !environment.autoConnectBluetooth -> note("Bluetooth $engine phone: automatic start is off")
-            // Nothing wireless can start here; neither a start nor a switch offer would help.
-            environment.wirelessUnavailable(engine) -> note("Bluetooth $engine phone: wireless is not available on this stereo")
-            environment.autoConnectPaused -> note("Bluetooth $engine phone: paused by the driver")
-            usbHolds(engine) -> note("Bluetooth $engine phone: a $engine phone is on USB; not starting wireless")
-            _state.value.isActive -> {
-                // Another phone reached the car while one is projecting: offer it, never take over
-                // (user request, 2026-10-09: "show that a device is available to switch").
-                val current = (_state.value as SessionState.Active).request
-                val samePhone = current.phoneAddress?.equals(address, ignoreCase = true) == true
-                if (!samePhone && _pendingSwitch.value?.phoneAddress?.equals(address, ignoreCase = true) != true &&
-                    address !in offeredThisSession) {
-                    offeredThisSession += address
-                    note("Bluetooth $engine phone while a ${current.engine} session runs; offering a switch")
-                    _pendingSwitch.value = SessionRequest(engine, Transport.WIRELESS, address, phoneName)
-                }
-            }
-            else -> {
-                // Another phone of the other kind connected too (both phones in the car): ask, as Home does.
-                val others = environment.connectedPhones().filterNot { it.address.equals(address, ignoreCase = true) }
-                val decision = PhoneChoice.decide(others + PhoneOption(address, phoneName, kind, present = true), address)
-                if (decision is PhoneChoice.Decision.Ask) {
-                    note("Bluetooth $engine phone while a phone of the other kind is connected too; asking the driver")
-                    _pendingChoice.value = decision.phones
-                } else start(SessionRequest(engine, Transport.WIRELESS, address, phoneName))
-            }
-        }
-    }
-
-    /**
-     * A phone of [engine] is plugged in and USB starts by itself: an automatic wireless start would
-     * put it on Wi-Fi Direct or the car hotspot while it is on the cable (issue #4). The driver can
-     * still choose wireless with Connect.
-     */
-    private fun usbHolds(engine: Engine) = environment.autoConnectUsb && environment.usbPhonePresent(engine)
-
-    /**
-     * This screen lost [address]'s Bluetooth pairing (detect/PairingLoss). Shown on Home as a
-     * blocked request; an attempt still connecting that phone stops, since it cannot succeed.
-     */
-    fun onPairingLost(address: String, kind: PhoneKind, phoneName: String?) {
-        val engine = kind.engine ?: return
-        val current = _state.value
-        if (current is SessionState.Active) {
-            val samePhone = current.request.phoneAddress?.equals(address, ignoreCase = true) == true
-            if (!samePhone || current.phase == SessionState.Phase.Connected) return note("Bluetooth pairing lost for another or a connected phone")
-            stop()
-        }
-        note("$engine blocked: this screen's Bluetooth pairing with the phone was lost")
-        _state.value = SessionState.Blocked(SessionRequest(engine, Transport.WIRELESS, address, phoneName), listOf(Problem.PAIRING_LOST))
-    }
-
-    /**
-     * Home came to the front (app opened, screen woke): start the last-used phone wirelessly, as a
-     * car head unit does on power-up, so the driver does not wait for a tap. A tablet is not a
-     * Bluetooth car kit, so the phone never connects to it by itself (DA§11.3). Same rules as a
-     * Bluetooth wake, plus: only from idle, at most once per [HOME_AUTO_START_COOLDOWN_MILLIS].
-     */
-    fun onHomeShown(address: String?, kind: PhoneKind?, phoneName: String?) {
-        val engine = kind?.engine ?: return
-        if (address == null) return
-        val now = SystemClock.uptimeMillis()
-        when {
-            !environment.autoConnectBluetooth || environment.autoConnectPaused -> return
-            _state.value !is SessionState.Idle -> return
-            // No Bluetooth attempt and no Wi-Fi Direct churn on a stereo where wireless cannot start.
-            environment.wirelessUnavailable(engine) -> return note("Home shown: wireless is not available on this stereo; not connecting")
-            usbHolds(engine) -> return note("Home shown: a $engine phone is on USB; not connecting wirelessly")
-            now - lastHomeAutoStart < HOME_AUTO_START_COOLDOWN_MILLIS -> return
-            // Home coming back because a session just ended is not "the car started".
-            now - lastSessionEndedAt < HOME_AUTO_START_COOLDOWN_MILLIS -> return
-            else -> {
-                lastHomeAutoStart = now
-                note("Home shown: connecting the last phone ($engine)")
-                start(SessionRequest(engine, Transport.WIRELESS, address, phoneName))
-            }
-        }
-    }
-
-    private val _pendingChoice = MutableStateFlow<List<PhoneOption>?>(null)
-
-    /** Phones of both kinds could connect: Home asks the driver which one (PhoneChoice). */
-    val pendingChoice: StateFlow<List<PhoneOption>?> = _pendingChoice.asStateFlow()
-
-    /**
-     * Home's automatic start with every phone it could connect: one phone (or the last phone) starts
-     * as in [onHomeShown]; an iPhone and an Android phone both in reach make Home ask instead.
-     */
-    fun onHomeShown(options: List<PhoneOption>, lastPhone: String?) {
-        val now = SystemClock.uptimeMillis()
-        if (!environment.autoConnectBluetooth || environment.autoConnectPaused || _state.value !is SessionState.Idle) return
-        // Phones that cannot start wirelessly here (or are on USB) are no candidates.
-        val usable = options.filter { o -> o.kind.engine?.let { !environment.wirelessUnavailable(it) && !usbHolds(it) } == true }
-        when (val decision = PhoneChoice.decide(usable, lastPhone)) {
-            is PhoneChoice.Decision.Start -> onHomeShown(decision.phone.address, decision.phone.kind, decision.phone.name)
-            is PhoneChoice.Decision.Ask -> {
-                if (now - lastHomeAutoStart < HOME_AUTO_START_COOLDOWN_MILLIS) return
-                if (now - lastSessionEndedAt < HOME_AUTO_START_COOLDOWN_MILLIS) return
-                lastHomeAutoStart = now
-                note("Home shown: ${decision.phones.size} phones of both kinds could connect; asking the driver")
-                _pendingChoice.value = decision.phones
-            }
-            PhoneChoice.Decision.Nothing -> Unit
-        }
-    }
-
-    /** The driver picked [phone] in Home's "Which phone?" question. */
-    fun choosePhone(phone: PhoneOption) {
-        _pendingChoice.value = null
-        connect(phone.address, phone.kind, phone.name)
-    }
-
-    /** The driver closed the question: nothing starts until they pick a phone. */
-    fun dismissChoice() {
-        _pendingChoice.value = null
-    }
-
-    private var lastHomeAutoStart = -HOME_AUTO_START_COOLDOWN_MILLIS
-    private var lastSessionEndedAt = -HOME_AUTO_START_COOLDOWN_MILLIS
-
-    /**
-     * The driver asked for Android Auto on this screen ([SessionRequest.selfMode]); experimental.
-     * Needs no phone, Bluetooth or Wi-Fi, so pre-flight is skipped.
-     */
-    fun startSelf() {
-        _pendingChoice.value = null
-        environment.autoConnectPaused = false
-        start(SessionRequest(Engine.ANDROID_AUTO, Transport.WIRELESS, null, null, selfMode = true))
-    }
-
-    /** The driver asked for this phone. Clears the pause and replaces any running session. */
-    fun connect(address: String?, kind: PhoneKind, phoneName: String?, transport: Transport = Transport.WIRELESS) {
-        val engine = kind.engine ?: return
-        _pendingChoice.value = null // the driver chose
-        environment.autoConnectPaused = false
-        // The kind came from Home's list, which may be an old guess; saving it made the guess stick
-        // (an iPhone on a module stereo started as Android Auto on every tap, 2026-11-08). The
-        // driver's own type pick is saved by PhonesRepository.setKind; a connection saves proof.
-        address?.let { environment.rememberPhone(it, null, phoneName) }
-        // The same phone asked again (a second tap, Home's automatic start racing the tap): restarting
-        // threw away an attempt 2 s from connected and paid a 6 s Bluetooth warm-up (tablet, 2026-10-20).
-        val current = (_state.value as? SessionState.Active)?.request
-        if (current != null && !current.selfMode && current.engine == engine && current.transport == transport &&
-            current.phoneAddress.equals(address, ignoreCase = true)) {
-            return note("$engine already running for this phone; not restarting")
-        }
-        start(SessionRequest(engine, transport, address, phoneName))
-    }
-
-    /**
-     * Try the last request again (Home's "Try again", or after the driver fixed a problem). A
-     * running attempt restarts, so a setting that applies at the next connection takes effect.
-     */
     fun retry() {
-        val request = when (val s = _state.value) {
-            is SessionState.Blocked -> s.request
-            is SessionState.Failed -> s.request
-            is SessionState.Active -> s.request
-            else -> return
+        val request = when (val shown = _state.value) {
+            is SessionState.Blocked -> shown.request
+            is SessionState.Failed -> shown.request
+            is SessionState.Active -> shown.request
+            SessionState.Idle -> return
         }
-        environment.autoConnectPaused = false
         start(request)
     }
-
-    /**
-     * The driver changed a setting (a Wi-Fi password, the connection type): a blocked request
-     * checks again at once, so the fix shows without a Try again.
-     */
-    /** "Forget and re-pair": the phone's connection record goes, so no stale path ranking survives. */
-    fun forgetPhone(phoneAddress: String) = profiles.forget(phoneAddress)
-
-    fun onSettingsChanged() {
-        if (_state.value !is SessionState.Blocked) return
-        note("settings changed; checking the blocked request again")
-        retry()
-    }
-
-    /** The driver cancelled or disconnected: stop, and pause automatic starts until they connect. */
+    fun onSettingsChanged() { if (_state.value is SessionState.Blocked) retry() }
     fun disconnect() {
-        note("driver disconnect")
-        environment.autoConnectPaused = true
-        val wasActive = _state.value.isActive
-        markDriverStop(_state.value)
+        automaticStartPaused = true
+        val active = _state.value.isActive
+        markDriverStop()
         stop()
-        // Leave the driver on CarLink's Home, not the system launcher the projection returns to.
-        if (wasActive) environment.returnHome()
+        if (active) environment.returnHome()
     }
-
-    /** Stops whatever runs and goes idle. */
     fun stop() {
-        if (_state.value.isActive) lastSessionEndedAt = SystemClock.uptimeMillis()
-        // An offer from a Bluetooth phone must not outlive the session (a late tap started a phone that left);
-        // a USB phone still plugged in is offered again on its next attach.
-        if (_pendingSwitch.value?.transport != Transport.USB) _pendingSwitch.value = null
-        offeredThisSession.clear()
         token++
         endAttempt()
         main.removeCallbacks(usbGoneCheck)
-        val engine = running
         _state.value = SessionState.Idle
-        if (engine != null) {
-            running = null
-            environment.onEngaged(null)
-            stopEngine(engine)
-        }
+        if (running) { running = false; stopEngine() }
         drainAfterStop()
     }
-
-    // --- Sessions ------------------------------------------------------------------------------
-
+    private fun markDriverStop() {
+        driverStoppedWithPhone = _state.value is SessionState.Active && environment.usbPhonePresent()
+        driverStoppedAt = clock()
+    }
     private fun start(request: SessionRequest) {
-        _pendingChoice.value = null // a phone is starting: an open "Which phone?" is answered
+        automaticStartPaused = false
+        driverStoppedWithPhone = false
         sessionId++
-        note("start ${request.engine} ${request.transport} known=${request.phoneAddress != null}")
+        note("start CARPLAY USB")
         stop()
-        recoveries.clear()
-        everConnected = false
-        quickRetries = 0
-        // Before any engine, warm-up or path: a wireless start cannot work on this stereo.
-        if (request.transport == Transport.WIRELESS && !request.selfMode && environment.wirelessUnavailable(request.engine)) {
-            note("${request.engine} blocked: wireless is not available on this stereo (external Bluetooth module)")
-            _state.value = SessionState.Blocked(request, listOf(Problem.EXTERNAL_BLUETOOTH))
-            return
-        }
-        val paths = if (request.transport == Transport.WIRELESS && !request.selfMode) {
-            val policy = environment.wirelessPaths(request)
-            profiles.rankPaths(request, policy).also {
-                if (it != policy) note("wireless paths $policy re-ordered by this phone's record: $it")
-            }
-        } else listOf(null)
-        begin(request, paths, index = 0, token, warm = true)
+        recoveries.clear(); everConnected = false; quickRetries = 0
+        begin(request, token)
     }
-
-    /**
-     * Pages an iPhone over Bluetooth from the moment wireless CarPlay is chosen (RELIABILITY_AUDIT
-     * plan item 7), in parallel with the previous engine's stop and the projection's launch.
-     */
-    private fun warmUp(request: SessionRequest) {
-        if (request.engine != Engine.CARPLAY || request.transport != Transport.WIRELESS || request.phoneAddress == null) return
-        val sessionToken = token
-        val started = clock()
-        val began = environment.warmUp(request) {
-            main.post { if (sessionToken == token) note("Bluetooth warm-up finished in ${clock() - started} ms") }
-        }
-        if (began) note("paging the iPhone over Bluetooth while CarPlay starts")
-    }
-
-    private fun begin(
-        request: SessionRequest,
-        paths: List<WirelessPath?>,
-        index: Int,
-        sessionToken: Int,
-        phase: SessionState.Phase = SessionState.Phase.Starting,
-        notice: Notice? = null,
-        warm: Boolean = false,
-    ) {
-        val path = paths[index]
-        val problems = if (request.selfMode) emptyList() else environment.preflight(request, path)
+    private fun begin(request: SessionRequest, sessionToken: Int, phase: SessionState.Phase = SessionState.Phase.Starting,
+        notice: Notice? = null, number: Int = 1) {
+        val problems = environment.preflight(request)
         if (problems.isNotEmpty()) {
-            note("${request.engine} blocked on ${path ?: "USB"}: $problems")
             _state.value = SessionState.Blocked(request, problems)
-            // The hotspot was the only thing missing: switch it on and start again (once per start).
-            if (problems == listOf(Problem.CAR_HOTSPOT_OFF) && hotspotTriedFor !== request) {
-                hotspotTriedFor = request
-                val trying = environment.turnOnCarHotspot { on ->
-                    main.post {
-                        if (sessionToken != token || _state.value !is SessionState.Blocked) return@post
-                        note(if (on) "car hotspot is on; starting again" else "could not switch the car hotspot on")
-                        if (on) begin(request, paths, index, sessionToken, phase, notice, warm)
-                    }
-                }
-                if (trying) note("switching the car hotspot on")
-            }
+            note("CarPlay blocked: $problems")
             return
         }
-        // Only past the preflight: paging a blocked iPhone brought its Bluetooth link up, which
-        // started the same blocked session again, several times a second (issue #20).
-        if (warm) warmUp(request)
-        val plan = SessionPlan(request.engine, request.transport, path, request.phoneAddress, request.phoneName,
-            request.usbAttach, attempt = index + 1, selfMode = request.selfMode)
-        _state.value = SessionState.Active(request, path, index + 1, phase, notice)
-        running = request.engine
-        environment.onEngaged(request.engine)
+        val plan = SessionPlan(request.phoneName, request.usbAttach, number)
+        _state.value = SessionState.Active(request, number, phase, notice)
+        running = true
         main.removeCallbacks(usbGoneCheck)
-        whenEnginesStopped {
-            if (sessionToken != token) return@whenEnginesStopped
+        whenStopped {
+            if (sessionToken != token) return@whenStopped
             worker.execute {
-                runCatching { applySettings(plan) }.onFailure { Log.w(TAG, "could not apply settings", it) }
+                runCatching { applySettings(plan) }.onFailure { Log.w(TAG, "could not apply wired settings", it) }
                 main.post {
                     if (sessionToken != token) return@post
-                    val a = Attempt(request, plan, paths, index, ++nextAttemptId, clock())
-                    attempt = a
-                    note("${plan.engine} starting on ${path ?: "USB"} (attempt ${plan.attempt})")
-                    adapters.getValue(plan.engine).start(plan) { event -> main.post { onEvent(a, event) } }
+                    val next = Attempt(request, plan, clock())
+                    attempt = next
+                    note("CARPLAY starting on USB (attempt $number)")
+                    adapter.start(plan) { event -> main.post { onEvent(next, event) } }
                     armWatchdog()
                 }
             }
         }
     }
-
     private fun onEvent(a: Attempt, event: AdapterEvent) {
         if (attempt !== a) return
         val current = _state.value as? SessionState.Active ?: return
-        val request = a.request
-        val plan = a.plan
         when (event) {
-            is AdapterEvent.Progress -> onProgress(a, current, event)
-            is AdapterEvent.Retrying -> {
-                val now = clock()
-                if (current.phase == SessionState.Phase.Connected) {
-                    // The picture was lost and the engine reconnects: a new wait, with fresh deadlines.
-                    a.startedAt = now
-                    a.totalFired = false
-                    enterStage(a, ProgressStage.WAITING_FOR_PHONE, now)
+            is AdapterEvent.Progress -> {
+                val now = clock(); val stage = ConnectionProfiles.normalize(event.stage)
+                val forward = order(stage) > order(a.stage)
+                if (stage != a.stage) {
+                    if (order(stage) > order(a.stage) && !a.connectedOnce) profiles.recordStage(a.request, a.stage, now - a.stageSince)
+                    a.stage = stage; a.stageSince = now; a.expiries = 0; a.hinted = false; a.phoneSilent = false
                 }
-                val detail = event.detail ?: event.reason.retryText(plan.engine)
-                note("${plan.engine} retrying at ${a.stage} (attempt ${event.attempt}, ${event.reason}: $detail)")
-                _state.value = current.copy(phase = SessionState.Phase.Retrying(event.attempt, event.reason, a.stage, detail))
+                _state.value = current.copy(phase = SessionState.Phase.Progress(event.step, event.stepCount,
+                    if (a.phoneSilent && stage == ProgressStage.WAITING_FOR_PHONE) ProgressStage.PHONE_NOT_ANSWERING else event.stage), notice = if (forward) null else current.notice)
+                armWatchdog()
+            }
+            is AdapterEvent.Retrying -> {
+                if (current.phase == SessionState.Phase.Connected) {
+                    a.startedAt = clock(); a.stageSince = clock(); a.stage = ProgressStage.WAITING_FOR_PHONE
+                    a.totalFired = false; a.expiries = 0; a.hinted = false
+                }
+                _state.value = current.copy(phase = SessionState.Phase.Retrying(event.attempt, event.reason, a.stage,
+                    event.detail ?: event.reason.retryText()))
                 armWatchdog()
             }
             AdapterEvent.Connected -> {
-                val now = clock()
                 main.removeCallbacks(watchdog)
-                val took = now - a.startedAt
+                val took = clock() - a.startedAt
                 if (!a.connectedOnce) {
                     a.connectedOnce = true
-                    profiles.recordStage(request, plan.path, a.stage, now - a.stageSince)
-                    profiles.recordSuccess(request, plan.path, took)
+                    profiles.recordStage(a.request, a.stage, clock() - a.stageSince)
+                    profiles.recordSuccess(a.request, took)
                 }
                 everConnected = true
-                note("${plan.engine} connected on ${plan.path ?: "USB"} in $took ms")
-                if (plan.path != null && request.phoneAddress != null) {
-                    environment.rememberWorkingPath(plan.engine, request.phoneAddress, plan.path)
-                }
-                val kind = if (plan.engine == Engine.CARPLAY) PhoneKind.IPHONE else PhoneKind.ANDROID
-                request.phoneAddress?.let { environment.rememberPhone(it, kind, request.phoneName) }
-                // A phone reached through the stereo's module is remembered with the module's own report.
-                environment.modulePhone(plan.engine)?.let { (address, name) ->
-                    if (address != request.phoneAddress) environment.rememberPhone(address, kind, name)
-                }
+                note("CARPLAY connected on USB in $took ms")
                 _state.value = current.copy(phase = SessionState.Phase.Connected, notice = null)
             }
             is AdapterEvent.Stalled -> {
-                val now = clock()
-                note("${plan.engine} stuck at ${a.stage} after ${now - a.stageSince} ms: ${event.detail}")
                 if (quickRetries < MAX_QUICK_RETRIES) {
                     quickRetries++
-                    profiles.recordFailure(request, plan.path, event.reason.name, a.stage, event.detail)
-                    replaceAttempt(a, a.index, SessionState.Phase.Retrying(a.index + 1, event.reason, a.stage, event.detail), notice = null)
-                } else {
-                    // Out of quick restarts: the phase's playbook decides now, not at its deadline.
-                    a.expiries++
-                    recover(a, a.stage, now - a.stageSince, stageDeadline(a))
-                }
+                    profiles.recordFailure(a.request, event.reason.name, a.stage, event.detail)
+                    replaceAttempt(a, SessionState.Phase.Retrying(a.plan.attempt + 1, event.reason, a.stage, event.detail))
+                } else { a.expiries++; recover(a, a.stage, clock() - a.stageSince) }
             }
-            is AdapterEvent.Restart -> {
-                note("${plan.engine} restarting on ${plan.path ?: "USB"}: ${event.detail}")
-                // The session ran, so its Wi-Fi Direct group works: the restart reads it instead of making one.
-                replaceAttempt(a, a.index, SessionState.Phase.Starting, notice = null, networkSuspect = false)
-            }
+            is AdapterEvent.Restart -> replaceAttempt(a, SessionState.Phase.Starting)
             is AdapterEvent.Ended -> {
-                note("${plan.engine} session ended${if (event.byUser) " by the driver" else ""}")
-                // The phone left (unplugged, or gone from the car's Wi-Fi and Bluetooth): Home, not
-                // the engine's waiting screen.
-                if (!event.byUser && (request.transport == Transport.WIRELESS || !environment.usbPhonePresent(plan.engine))) {
-                    environment.returnHome()
-                }
-                if (event.byUser) environment.autoConnectPaused = true
-                // Stopping re-enumerates a phone still on USB; that attach is not a new plug-in, by
-                // the driver's stop or the engine's own end alike (else: restart loop).
-                markDriverStop(current)
-                stop()
+                if (event.byUser) automaticStartPaused = true
+                if (!event.byUser && !environment.usbPhonePresent()) environment.returnHome()
+                markDriverStop(); stop()
             }
             is AdapterEvent.Failed -> {
-                profiles.recordFailure(request, plan.path, event.reason.name, a.stage, event.detail)
-                val next = a.index + 1
-                if (event.reason.pathRelated && next < a.paths.size) {
-                    note("${plan.engine} on ${plan.path} failed (${event.reason}${event.detail?.let { ": $it" } ?: ""}); trying ${a.paths[next]}")
-                    // Same session for the driver: keep showing progress, not a failure.
-                    replaceAttempt(a, next, SessionState.Phase.Retrying(next + 1, event.reason, a.stage,
-                        event.detail ?: event.reason.retryText(plan.engine)), notice = null)
-                } else {
-                    failSession(a, event.reason, event.detail)
-                }
+                profiles.recordFailure(a.request, event.reason.name, a.stage, event.detail)
+                failSession(a, event.reason, event.detail)
             }
         }
     }
-
-    private fun onProgress(a: Attempt, current: SessionState.Active, event: AdapterEvent.Progress) {
-        val now = clock()
-        val stage = ConnectionProfiles.normalize(event.stage)
-        a.step = event.step
-        a.stepCount = event.stepCount
-        var notice = current.notice
-        if (stage != a.stage) {
-            if (order(stage) > order(a.stage)) {
-                // Real progress: the phase that ended is a sample for this phone's deadlines, and
-                // whatever the driver was told about it no longer applies.
-                if (!a.connectedOnce) profiles.recordStage(a.request, a.plan.path, a.stage, now - a.stageSince)
-                notice = null
-                a.phoneSilent = false
-            }
-            enterStage(a, stage, now)
-            armWatchdog()
-        }
-        val shown = if (a.phoneSilent && stage == ProgressStage.WAITING_FOR_PHONE) ProgressStage.PHONE_NOT_ANSWERING else event.stage
-        _state.value = current.copy(phase = SessionState.Phase.Progress(event.step, event.stepCount, shown), notice = notice)
-    }
-
-    private fun enterStage(a: Attempt, stage: ProgressStage, now: Long) {
-        a.stage = stage
-        a.stageSince = now
-        a.expiries = 0
-        a.hinted = false
-    }
-
-    // --- Stall watchdog ------------------------------------------------------------------------
-
-    private fun stageDeadline(a: Attempt): Long {
-        val usual = profiles.deadline(a.request, a.plan.path, a.stage)
-        return moduleWait(a)?.let { maxOf(usual, it) } ?: usual
-    }
-
-    /**
-     * A stereo's Bluetooth module pages the phone itself and takes up to its own wait (a cold page
-     * took 25 s): saying "not answering" at 10 s made drivers tap again and restart it.
-     */
-    private fun moduleWait(a: Attempt): Long? {
-        val wait = environment.modulePhoneWaitMillis(a.request) ?: return null
-        return when (a.stage) {
-            ProgressStage.WAITING_FOR_PHONE, ProgressStage.PHONE_NOT_ANSWERING -> wait
-            // Over the module the engine repeats its opener while the phone is silent and ends a
-            // dead attempt itself (15 s); a restart at the 6 s floor only redid Wi-Fi Direct (2026-11-04).
-            ProgressStage.HANDSHAKE -> MODULE_HANDSHAKE_MILLIS
-            else -> null
-        }
-    }
-
-    private fun hintAfter(a: Attempt, deadline: Long) =
-        moduleWait(a)?.takeIf { a.stage != ProgressStage.HANDSHAKE } ?: minOf(AdaptiveDeadlines.HINT_MILLIS, deadline)
-    private fun totalDeadline(a: Attempt) = profiles.deadline(a.request, a.plan.path, null)
-
     private fun armWatchdog() {
         main.removeCallbacks(watchdog)
         val a = attempt ?: return
         if ((_state.value as? SessionState.Active)?.phase == SessionState.Phase.Connected) return
-        val deadline = stageDeadline(a)
-        var due = a.stageSince + deadline * (a.expiries + 1)
-        if (!a.hinted) due = minOf(due, a.stageSince + hintAfter(a, deadline))
-        if (!a.totalFired) due = minOf(due, a.startedAt + totalDeadline(a))
+        var due = a.stageSince + profiles.deadline(a.request, a.stage) * (a.expiries + 1)
+        if (!a.hinted) due = minOf(due, a.stageSince + minOf(AdaptiveDeadlines.HINT_MILLIS, profiles.deadline(a.request, a.stage)))
+        if (!a.totalFired) due = minOf(due, a.startedAt + profiles.deadline(a.request, null))
         main.postDelayed(watchdog, (due - clock()).coerceAtLeast(0))
     }
-
     private fun onWatchdog() {
         val a = attempt ?: return
         val current = _state.value as? SessionState.Active ?: return
         if (current.phase == SessionState.Phase.Connected) return
-        val now = clock()
-        val deadline = stageDeadline(a)
-        val inStage = now - a.stageSince
-        if (!a.hinted && inStage >= hintAfter(a, deadline)) {
+        val elapsed = clock() - a.stageSince
+        val deadline = profiles.deadline(a.request, a.stage)
+        if (!a.hinted && elapsed >= minOf(AdaptiveDeadlines.HINT_MILLIS, deadline)) {
             a.hinted = true
-            hint(a, inStage)
+            a.phoneSilent = a.stage == ProgressStage.WAITING_FOR_PHONE
+            _state.value = current.copy(notice = Notice(if (a.phoneSilent) Notice.Kind.PHONE_NOT_ANSWERING else Notice.Kind.SLOW,
+                a.stage, "${StallPlaybook.phaseName(a.stage)} has taken ${elapsed / 1000} s"))
         }
-        if (inStage >= deadline * (a.expiries + 1)) {
-            a.expiries++
-            recover(a, a.stage, inStage, deadline)
-        }
-        if (attempt === a && !a.totalFired && now - a.startedAt >= totalDeadline(a)) {
-            a.totalFired = true
-            recover(a, null, now - a.startedAt, totalDeadline(a))
+        if (elapsed >= deadline * (a.expiries + 1)) { a.expiries++; recover(a, a.stage, elapsed) }
+        if (attempt === a && !a.totalFired && clock() - a.startedAt >= profiles.deadline(a.request, null)) {
+            a.totalFired = true; recover(a, null, clock() - a.startedAt)
         }
         if (attempt === a) armWatchdog()
     }
-
-    /** Tells the driver why it waits (the audit's "never a silent wait over ~10 s"). */
-    private fun hint(a: Attempt, waited: Long) {
-        val current = _state.value as? SessionState.Active ?: return
-        if (a.stage == ProgressStage.WAITING_FOR_PHONE && !a.request.selfMode) {
-            a.phoneSilent = true
-            note("${a.plan.engine}: the phone has not answered for ${waited / 1000} s")
-            val phase = (current.phase as? SessionState.Phase.Progress)
-                ?.takeIf { it.stage == ProgressStage.WAITING_FOR_PHONE }?.copy(stage = ProgressStage.PHONE_NOT_ANSWERING)
-                ?: current.phase
-            _state.value = current.copy(phase = phase, notice = Notice(Notice.Kind.PHONE_NOT_ANSWERING, a.stage,
-                "The phone has not answered for ${waited / 1000} s"))
-        } else {
-            val usual = profiles.usualMillis(a.request, a.plan.path, a.stage)
-            val message = "${StallPlaybook.phaseName(a.stage)} is taking longer than usual" +
-                (usual?.let { " (usually ${seconds(it)})" } ?: "")
-            note("${a.plan.engine}: ${message.replaceFirstChar { it.lowercase() }}, ${waited / 1000} s so far")
-            _state.value = current.copy(notice = Notice(Notice.Kind.SLOW, a.stage, message))
-        }
-    }
-
-    /** Applies the playbook's next action for [stage] (null: the whole attempt). */
-    private fun recover(a: Attempt, stage: ProgressStage?, waited: Long, deadline: Long) {
-        val plan = a.plan
-        val request = a.request
-        // Self Mode: a phase deadline only says it is slow, it never tears down (open-headunit
-        // SelfLaunchTimeoutPolicy: a link dropped before the version exchange leaves Android Auto's
-        // head unit server deaf until restarted by hand). The whole-attempt backstop still gives up.
-        if (request.selfMode && stage != null) return note("stall: Android Auto on this screen, ${StallPlaybook.phaseName(stage).lowercase()} has taken $waited ms; still waiting")
-        val key = a.index to stage
-        val (action, used) = StallPlaybook.next(StallPlaybook.actions(plan.engine, plan.transport, stage),
-            recoveries[key] ?: 0, a.index + 1 < a.paths.size)
-        recoveries[key] = used
-        val usual = profiles.usualMillis(request, plan.path, stage)
-        val phaseName = StallPlaybook.phaseName(stage)
-        note("stall: ${plan.engine} ${phaseName.lowercase()} on ${plan.path ?: "USB"} has taken $waited ms " +
-            "(deadline $deadline ms${usual?.let { ", usual $it ms" } ?: ""}); $action")
-        val kind = AttemptOutcome.stallKind(stage)
-        val what = "$phaseName took ${waited / 1000} s"
-        val message = "$what: ${StallPlaybook.actionText(action)}"
+    private fun recover(a: Attempt, stage: ProgressStage?, waited: Long) {
+        val (action, used) = StallPlaybook.next(StallPlaybook.actions(stage), recoveries[stage] ?: 0)
+        recoveries[stage] = used
+        val message = "${StallPlaybook.phaseName(stage)} took ${waited / 1000} s: ${StallPlaybook.actionText(action)}"
+        note("stall: CARPLAY USB $stage; $message")
         when (action) {
-            RecoveryAction.NUDGE, RecoveryAction.RESWITCH_USB -> {
-                val applied = adapters.getValue(plan.engine).recover(action)
-                profiles.recordProblem(request, plan.path, stage, kind, if (applied) message else "$what; still waiting")
-                val current = _state.value as? SessionState.Active ?: return
-                // Waiting for the phone: Home keeps saying what to check on it.
-                if (current.notice?.kind != Notice.Kind.PHONE_NOT_ANSWERING) {
-                    _state.value = current.copy(notice = Notice(Notice.Kind.RECOVERING, stage,
-                        if (applied) message else "$what; still waiting", action))
-                }
+            RecoveryAction.NUDGE -> {
+                adapter.recover(action)
+                profiles.recordProblem(a.request, stage, AttemptOutcome.stallKind(stage), message)
             }
-            RecoveryAction.RETRY_STEP, RecoveryAction.RESET_WIFI_DIRECT, RecoveryAction.NEXT_PATH -> {
-                profiles.recordFailure(request, plan.path, kind, stage, message)
-                val (reason, _) = StallPlaybook.failure(plan.engine, plan.transport, stage, waited)
-                val index = if (action == RecoveryAction.NEXT_PATH) a.index + 1 else a.index
-                replaceAttempt(a, index, SessionState.Phase.Retrying(index + 1, reason, a.stage, message),
-                    Notice(Notice.Kind.RECOVERING, stage, message, action),
-                    networkSuspect = action != RecoveryAction.RETRY_STEP || !StallPlaybook.beforeNetwork(stage))
+            RecoveryAction.RETRY_STEP -> {
+                profiles.recordFailure(a.request, AttemptOutcome.stallKind(stage), stage, message)
+                replaceAttempt(a, SessionState.Phase.Retrying(a.plan.attempt + 1, StallPlaybook.failure(stage, waited).first, a.stage, message),
+                    Notice(Notice.Kind.RECOVERING, stage, message, action))
             }
-            RecoveryAction.ASK_REPLUG -> {
-                profiles.recordFailure(request, plan.path, kind, stage, message)
-                failSession(a, FailureReason.USB, "unplug the phone and plug it in again ($what)")
-            }
-            RecoveryAction.GIVE_UP -> {
-                profiles.recordFailure(request, plan.path, kind, stage, message)
-                val (reason, detail) = StallPlaybook.failure(plan.engine, plan.transport, stage, waited)
-                failSession(a, reason, detail)
+            RecoveryAction.ASK_REPLUG, RecoveryAction.GIVE_UP -> {
+                profiles.recordFailure(a.request, AttemptOutcome.stallKind(stage), stage, message)
+                val reason = if (action == RecoveryAction.ASK_REPLUG) FailureReason.USB else StallPlaybook.failure(stage, waited).first
+                failSession(a, reason, message)
             }
         }
     }
-
-    /** Stops [a]'s engine and starts path [index] (the same one, or the next) once it has stopped. */
-    private fun replaceAttempt(a: Attempt, index: Int, phase: SessionState.Phase, notice: Notice?, networkSuspect: Boolean = true) {
+    private fun replaceAttempt(a: Attempt, phase: SessionState.Phase, notice: Notice? = null) {
         endAttempt()
-        val current = _state.value as? SessionState.Active ?: return
-        _state.value = current.copy(phase = phase, notice = notice)
-        running = null
-        // The same Wi-Fi Direct attempt again, with the network not in doubt: Android Auto keeps its
-        // group (open-headunit NativeGroupKeepPolicy), so the phone rejoins the network it just used.
-        stopEngine(a.plan.engine, keepWirelessNetwork = index == a.index && !networkSuspect &&
-            a.plan.path == WirelessPath.WIFI_DIRECT)
-        begin(a.request, a.paths, index, token, phase, notice)
+        running = false
+        stopEngine()
+        begin(a.request, token, phase, notice, a.plan.attempt + 1)
     }
-
     private fun failSession(a: Attempt, reason: FailureReason, detail: String?) {
-        note("${a.plan.engine} failed: $reason${detail?.let { " ($it)" } ?: ""}")
-        // The engine's stop re-enumerates a USB phone; that attach must not restart the failed
-        // session over and over while the failure ("unplug and plug in again") is on screen.
-        markDriverStop(_state.value)
-        token++
-        endAttempt()
-        running = null
-        environment.onEngaged(null)
-        stopEngine(a.plan.engine)
-        _state.value = SessionState.Failed(a.request, a.plan.path, reason, detail, a.stage)
+        markDriverStop(); token++; endAttempt(); running = false; stopEngine()
+        _state.value = SessionState.Failed(a.request, reason, detail, a.stage)
     }
-
-    private fun endAttempt() {
-        attempt = null
-        main.removeCallbacks(watchdog)
-    }
-
-    // --- Engine stops --------------------------------------------------------------------------
-
-    private fun stopEngine(engine: Engine, keepWirelessNetwork: Boolean = false) {
+    private fun endAttempt() { attempt = null; main.removeCallbacks(watchdog) }
+    private fun stopEngine() {
         stopping++
         val started = clock()
-        adapters.getValue(engine).stop(keepWirelessNetwork) {
-            main.post {
-                stopping--
-                note("$engine stopped in ${clock() - started} ms")
-                drainAfterStop()
-            }
-        }
+        adapter.stop { main.post { stopping--; note("CARPLAY stopped in ${clock() - started} ms"); drainAfterStop() } }
     }
-
-    /** Runs [action] once no engine is stopping and no warm-up runs. */
-    private fun whenEnginesStopped(action: () -> Unit) {
-        if (stopping == 0) action() else afterStop.addLast(action)
-    }
-
-    private fun drainAfterStop() {
-        while (stopping == 0 && afterStop.isNotEmpty()) afterStop.removeFirst().invoke()
-    }
-
-    private fun note(message: String) {
-        val line = if (sessionId > 0) "$message #s$sessionId" else message
-        Log.i(TAG, line)
-        environment.log(line)
-    }
-
+    private fun whenStopped(action: () -> Unit) { if (stopping == 0) action() else afterStop.addLast(action) }
+    private fun drainAfterStop() { while (stopping == 0 && afterStop.isNotEmpty()) afterStop.removeFirst().invoke() }
+    private fun note(message: String) { val line = "$message #s$sessionId"; Log.i(TAG, line); environment.log(line) }
     companion object {
         private const val TAG = "CarLink-Session"
-
-        /** Longer than CarPlay's configuration switch and Android Auto's accessory switch. */
         const val USB_GONE_GRACE_MILLIS = 3_500L
-
-        /** How long a phone may stay silent before Home says it is not answering (USB too). */
-        const val NOT_ANSWERING_MILLIS = AdaptiveDeadlines.HINT_MILLIS
-
-        /** The handshake's least deadline over a stereo's Bluetooth module: DiAuto's 15 s wait for the phone's request, plus a margin. */
-        const val MODULE_HANDSHAKE_MILLIS = 16_000L
-
-        /** A failed or cancelled automatic start is not retried every time Home reappears. */
-        const val HOME_AUTO_START_COOLDOWN_MILLIS = 60_000L
-
-        /** After the picture is up: long enough for a cable wiggle, short enough to feel instant. */
         const val USB_GONE_CONNECTED_GRACE_MILLIS = 1_200L
-
-        /** How long USB attaches after the driver's Disconnect count as re-enumeration. */
         const val REENUMERATION_WINDOW_MILLIS = 10_000L
-
-        /**
-         * Immediate restarts for [AdapterEvent.Stalled] per request. Tablet 2026-10-20: a start
-         * stuck twice (no StartSession, then no TCP) and the third try connected in 4.0 s.
-         */
+        const val NOT_ANSWERING_MILLIS = AdaptiveDeadlines.HINT_MILLIS
         const val MAX_QUICK_RETRIES = 2
-
-        private fun order(stage: ProgressStage) = when (stage) {
+        private fun order(stage: ProgressStage): Int = when (stage) {
             ProgressStage.WAITING_FOR_PHONE, ProgressStage.PHONE_NOT_ANSWERING -> 0
             ProgressStage.HANDSHAKE -> 1
-            ProgressStage.JOINING_WIFI -> 2
-            ProgressStage.STARTING_PROJECTION -> 3
+            ProgressStage.STARTING_PROJECTION -> 2
         }
-
-        private fun seconds(millis: Long) = if (millis < 10_000) "%.1f s".format(millis / 1000.0) else "${millis / 1000} s"
     }
 }
-
-/** What the engine is retrying after, in the driver's words (for [SessionState.Phase.Retrying.detail]). */
-fun FailureReason.retryText(engine: Engine): String {
-    val phone = if (engine == Engine.CARPLAY) "iPhone" else "phone"
-    return when (this) {
-        FailureReason.PHONE_REFUSED_WIFI -> "the $phone refused the car's Wi-Fi"
-        FailureReason.PHONE_NEVER_REACHED_CAR -> "the $phone did not connect over the car's Wi-Fi"
-        FailureReason.PHONE_WIFI_OFF -> "the $phone's Wi-Fi is off"
-        FailureReason.LINK_TOO_WEAK -> "the connection dropped"
-        FailureReason.WIFI_SETUP_FAILED -> "the car's Wi-Fi link could not be set up"
-        FailureReason.BLUETOOTH -> "the $phone did not answer over Bluetooth"
-        FailureReason.EXTERNAL_BLUETOOTH -> "this stereo's Bluetooth cannot be used for wireless"
-        FailureReason.EXTERNAL_MODULE -> "the stereo's Bluetooth module could not be reached"
-        FailureReason.PHONE_DID_NOT_ANSWER -> "the $phone did not answer"
-        FailureReason.USB -> "the USB link restarted"
-        FailureReason.BLOCKED -> "a permission or switch is missing"
-        FailureReason.AUTHENTICATION -> "authentication failed"
-        FailureReason.HEAD_UNIT_SERVER_OFF -> "Android Auto's head unit server is not running"
-        FailureReason.ENGINE -> "the engine restarted"
-    }
+fun FailureReason.retryText(): String = when (this) {
+    FailureReason.LINK_TOO_WEAK -> "the connection dropped"
+    FailureReason.PHONE_DID_NOT_ANSWER -> "the iPhone did not answer"
+    FailureReason.USB -> "the USB link restarted"
+    FailureReason.BLOCKED -> "a permission is missing"
+    FailureReason.AUTHENTICATION -> "authentication failed"
+    FailureReason.ENGINE -> "the engine restarted"
 }

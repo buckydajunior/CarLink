@@ -1,6 +1,4 @@
-// CarLink's connection backend as a library: phone detection, the session layer, both engine
-// adapters, the unified settings and the session log. Both engines come with it (api), so a host
-// app (CarLink, or a launcher) depends on this module alone. See docs/INTEGRATION.md.
+// Wired CarPlay backend: USB lifecycle, DiPlay adapter, display policy and connection history.
 plugins {
     alias(libs.plugins.android.library)
 }
@@ -13,8 +11,14 @@ android {
 
     defaultConfig {
         minSdk = 25
-        // The Android Auto engine library ships two distribution flavors; CarLink uses github.
-        missingDimensionStrategy("distribution", "github")
+        consumerProguardFiles("consumer-rules.pro")
+    }
+    ndkVersion = "28.2.13676358"
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
     }
 
     compileOptions {
@@ -30,10 +34,11 @@ android {
 dependencies {
     api(project(":carplay-common"))
     api(project(":carplay-shared"))
-    api(project(":androidauto"))
 
     implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.lifecycle.runtime.ktx)
 
     testImplementation(libs.junit)
     testImplementation("org.robolectric:robolectric:4.17")
+    testImplementation("org.mockito:mockito-core:5.20.0")
 }

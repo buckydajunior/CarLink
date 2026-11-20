@@ -2,6 +2,7 @@
 <!-- Window-level colors only; Compose UI uses ui/theme/CarLinkTheme.kt (design/DESIGN_SPEC.md §5.1). -->
 <resources>
     <color name="carlink_icon_background">#1C2531</color>
+    <color name="carlink_idle_background">#0B111A</color>
     <color name="carlink_window_background">#F2F4F7</color>
     <color name="carlink_window_surface">#F2F4F7</color>
     <color name="carlink_accent">#006273</color>

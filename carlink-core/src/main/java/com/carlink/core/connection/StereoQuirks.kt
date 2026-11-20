@@ -6,7 +6,7 @@ import java.util.Locale
 /**
  * Per-stereo quirk profiles: known-good overrides for chips where CarLink's own probes
  * ([DeviceCapabilities], the GPU class) can miss what a report showed. They only change Automatic
- * picture ([Connection.automaticPicture]): a driver who chose a Picture preset or Custom keeps it.
+ * picture (Automatic picture): a driver who chose a Picture preset or Custom keeps it.
  *
  * Seed only with facts a report, a commit or a doc shows; cite it in [Profile.evidence].
  * Matching is a case-insensitive substring of Build.MANUFACTURER, BOARD, HARDWARE or SOC_MODEL.
@@ -19,24 +19,19 @@ object StereoQuirks {
         /** Any one of these, in any Build field, selects the profile. */
         val tokens: List<String>,
         val evidence: String,
-        /** False: H.264 for both engines (DiPlay `hevc_enabled` off, DiAuto `video-codec` H.264). */
+        /** False: H.264 in DiPlay (`hevc_enabled` off). */
         val hevc: Boolean? = null,
         /** DiPlay Direct video output (a SurfaceView, no GPU pass per frame). */
         val carPlayDirectVideo: Boolean? = null,
-        /** DiAuto `view-mode` SurfaceView. */
-        val aaSurfaceView: Boolean? = null,
     ) {
         fun apply(choice: PictureChoice): PictureChoice = choice.copy(
             carPlayHevc = hevc ?: choice.carPlayHevc,
-            aaCodec = if (hevc == false) PicturePolicy.H264 else choice.aaCodec,
             carPlayDirectVideo = carPlayDirectVideo ?: choice.carPlayDirectVideo,
-            aaSurfaceView = aaSurfaceView ?: choice.aaSurfaceView,
         )
 
         fun describe(): String = listOfNotNull(
             hevc?.let { "HEVC ${if (it) "on" else "off"}" },
             carPlayDirectVideo?.let { "CarPlay direct video ${if (it) "on" else "off"}" },
-            aaSurfaceView?.let { "Android Auto SurfaceView ${if (it) "on" else "off"}" },
         ).joinToString(", ")
     }
 
