@@ -1,4 +1,4 @@
-> **F-150 fork, version 1.2.4:** the current product has `:app` (clock/status, settings, music EQ, call audio,
+> **F-150 fork, version 1.2.5:** the current product has `:app` (clock/status, settings, music EQ, call audio,
 > About and log export), `:carlink-core` (one USB CarPlay session, USB routing/wake/reset,
 > display policy, per-renderer music PCM equalization and timing history),
 > and DiPlay's `:carplay-common` / `:carplay-shared` engine. Android Auto and the generic wireless,
@@ -30,7 +30,11 @@ settings launch from clearing/destroying the projection activity above it in a s
 and PCM encoding; only raw `media` + `MEDIA` PCM16 mono/stereo creates `Pcm16Equalizer`. Calls routed
 as media, navigation, Siri and microphone remain outside the DSP path. Each renderer owns filter
 history. Steady Off/flat is an O(1) byte-exact bypass; active processing uses five peaking biquads,
-20 ms bank crossfades and headroom/saturation. It does not change AudioTrack sizing, routing or
+20 ms bank crossfades. Each bank detects actual PCM sample peaks and applies one linked gain to
+both channels: immediate attenuation, 10 ms hold and 100 ms release, with a final saturation guard.
+The gain is unity until actual output requires limiting; the old theoretical-response preamp cut
+is removed. Per-bank limiting precedes the crossfade so a dry target does not inherit wet limiter
+attenuation. Reused current-frame scratch adds no lookahead/queued delay or callback allocations. It does not change AudioTrack sizing, routing or
 USB startup. DSP/routing tests cannot verify a Linkswell's acoustic output or CPU/connection time.
 
 `F150Profile` defaults software call AEC Off. A one-time 1.2.4 migration also clears the enabled

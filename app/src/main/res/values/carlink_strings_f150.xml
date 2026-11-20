@@ -48,7 +48,7 @@
     <string name="carlink_f150_call_echo_body">Experimental call processing, off by default. It may reduce voice quality. Leave it off to use the tablet’s available call processing.</string>
     <string name="carlink_f150_call_echo_apply">After changing this, unplug and reconnect your iPhone. Off uses the tablet’s available call processing. If echo or delay continues, share a connection log after a call.</string>
     <string name="carlink_f150_eq_reset">Reset to flat</string>
-    <string name="carlink_f150_eq_headroom">Boosts reserve headroom to reduce distortion, so the overall volume may decrease.</string>
+    <string name="carlink_f150_eq_headroom">Peak protection reduces the level only when needed to prevent clipping. Large boosts can still trigger it.</string>
     <string name="carlink_f150_hz">%1$s Hz</string>
     <string name="carlink_f150_khz">%1$s kHz</string>
     <string name="carlink_f150_db">%1$+d dB</string>

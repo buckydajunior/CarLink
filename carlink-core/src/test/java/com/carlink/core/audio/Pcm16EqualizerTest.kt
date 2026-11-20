@@ -29,7 +29,7 @@ class Pcm16EqualizerTest {
         }
     }
 
-    @Test fun boostChangesToneBalanceAndReservesHeadroom() {
+    @Test fun boostAddsTheRequestedGainWithoutTurningDownUntouchedFrequencies() {
         val settings = EqualizerSettings(true, listOf(0f, 0f, 6f, 0f, 0f))
         val center = tone(910.0)
         val far = tone(30.0)
@@ -39,8 +39,16 @@ class Pcm16EqualizerTest {
         processor(settings).process(far, 0, far.size)
         val centerGain = rms(center) / originalCenter
         val farGain = rms(far) / originalFar
-        assertEquals(6.0, 20.0 * log10(centerGain / farGain), 0.12)
-        assertTrue("automatic preamp leaves headroom", centerGain < 1.0)
+        assertEquals("+6dB is actual amplification when samples have room", 6.0, 20.0 * log10(centerGain), 0.08)
+        assertEquals("Untouched frequencies keep their level", 0.0, 20.0 * log10(farGain), 0.08)
+    }
+
+    @Test fun quietAudioReceivesTheFullTwelveDbBoostWithoutStaticAttenuation() {
+        val data = tone(910.0, amplitude = 1_000)
+        val before = rms(data)
+        processor(EqualizerSettings(true, listOf(0f, 0f, 12f, 0f, 0f))).process(data, 0, data.size)
+        assertEquals(12.0, 20.0 * log10(rms(data) / before), 0.08)
+        assertTrue("No clipping protection is needed for this quiet signal", peak(data) < 5_000)
     }
 
     @Test fun stereoFiltersDoNotLeakIntoTheOtherChannel() {
@@ -52,15 +60,16 @@ class Pcm16EqualizerTest {
         assertTrue(abs(sample(data, 40_001 * 4)) > 0)
     }
 
-    @Test fun chunkingAndNonzeroByteOffsetsPreserveTheContinuousFilterHistory() {
-        val settings = EqualizerSettings(true, listOf(4f, -3f, 6f, -2f, 1f))
+    @Test fun chunkingAndNonzeroByteOffsetsPreserveFilterAndActiveLimiterHistory() {
+        val settings = EqualizerSettings(true, listOf(12f, -3f, 12f, -2f, 12f))
         var random = 7
         val source = pcm(12_007, 2) { _, _ ->
             random = random * 1_664_525 + 1_013_904_223
-            (random shr 18).coerceIn(-10_000, 10_000)
+            random shr 16
         }
         val whole = source.copyOf()
         processor(settings, 2).process(whole, 0, whole.size)
+        assertEquals("This signal must actually reach peak limiting", PEAK_CEILING, peak(whole))
         val chunked = source.copyOf()
         val filter = processor(settings, 2)
         val sizes = intArrayOf(1, 7, 960, 2, 117)
@@ -117,6 +126,56 @@ class Pcm16EqualizerTest {
         assertArrayEquals(original, untouched)
     }
 
+    @Test fun stereoPeakProtectionLinksBothChannelsInsteadOfMovingTheStereoImage() {
+        val data = pcm(48_000, 2) { frame, channel ->
+            val right = (7_500 * sin(2 * PI * 910 * frame / 48_000)).roundToInt()
+            if (channel == 0) right * 4 else right
+        }
+        processor(EqualizerSettings(true, listOf(0f, 0f, 12f, 0f, 0f)), channels = 2)
+            .process(data, 0, data.size)
+        assertEquals(PEAK_CEILING, peak(data))
+        for (frame in 24_000 until 48_000) {
+            val left = sample(data, frame * 4)
+            val right = sample(data, frame * 4 + 2)
+            assertTrue("Same gain must protect L/R together at frame $frame", abs(left - right * 4) <= 3)
+        }
+    }
+
+    @Test fun aLoudLeftChannelProtectsBothChannelsThenQuietAudioRecoversToUnity() {
+        val data = pcm(57_600, 2) { frame, channel ->
+            if (channel == 1) 3_000
+            else if (frame < 4_800) (30_000 * sin(2 * PI * 910 * frame / 48_000)).roundToInt()
+            else 0
+        }
+        processor(EqualizerSettings(true, listOf(0f, 0f, 12f, 0f, 0f)), channels = 2)
+            .process(data, 0, data.size)
+        assertTrue("Left overload also reduces the otherwise quiet right channel", sample(data, 4_000 * 4 + 2) in 1..1_500)
+        assertTrue("Every processed peak is bounded", peak(data) <= PEAK_CEILING)
+        // Ten 100ms release time constants after the burst are ample to regain unity;
+        // protection must not retain a permanent preamp cut or add automatic makeup gain.
+        val recovered = (52_800 until 57_600).map { sample(data, it * 4 + 2) }.average()
+        assertEquals(3_000.0, recovered, 5.0)
+    }
+
+    @Test fun disablingOrResettingFlatAfterLimitingCrossfadesToExactDryWithoutALevelJump() {
+        val boosted = EqualizerSettings(true, listOf(12f, 0f, 0f, 0f, 0f)).normalized()
+        for (destination in listOf(boosted.copy(enabled = false), EqualizerSettings(true))) {
+            var selected = boosted
+            val filter = Pcm16Equalizer(48_000, 1) { selected }
+            val warm = tone(60.0, amplitude = 30_000)
+            filter.process(warm, 0, warm.size)
+            assertEquals("The transition starts from sustained limiting", PEAK_CEILING, peak(warm))
+            selected = destination.normalized()
+            val dry = tone(60.0, amplitude = 30_000, frames = 4_800, startFrame = 48_000)
+            val transition = dry.copyOf()
+            filter.process(transition, 0, transition.size)
+            assertTrue("No jump at the first crossfade frame", abs(sample(transition, 0) - sample(warm, warm.size - 2)) < 1_000)
+            assertTrue("No gain-release jump at the dry handoff", maxStep(transition) < 1_000)
+            assertArrayEquals("Off/flat is exact dry after the 20ms fade", dry.copyOfRange(960 * 2, dry.size),
+                transition.copyOfRange(960 * 2, transition.size))
+        }
+    }
+
     @Test fun malformedBuffersAndBandsAboveNyquistSafelyBypass() {
         val settings = EqualizerSettings(true, listOf(0f, 0f, 0f, 0f, 12f))
         val data = pcm(1_000) { frame, _ -> frame * 21 - 10_000 }
@@ -140,23 +199,17 @@ class Pcm16EqualizerTest {
             peak = maxOf(peak, abs(value))
             correlation += value * sin(2 * PI * 910 * frame / 48_000)
         }
-        assertTrue("headroom keeps sustained peaks below clipping", peak in 29_000..32_000)
+        assertTrue("Peak protection prevents PCM overflow", peak in 32_600..PEAK_CEILING)
         assertTrue("boosted positive peaks do not wrap negative", correlation > 100_000_000)
     }
 
-    @Test fun filterRingingOnFullScaleStepsSaturatesInsteadOfWrapping() {
+    @Test fun filterRingingOnFullScaleStepsIsPeakLimitedInsteadOfWrapping() {
         // A steep full-scale step can exceed PCM range even with a cut-only response.
         val data = pcm(8_000) { frame, _ -> if (frame / 1_000 % 2 == 0) -32_768 else 32_767 }
         processor(EqualizerSettings(true, listOf(0f, 0f, 0f, 0f, -12f))).process(data, 0, data.size)
-        var positiveClipped = false
-        var negativeClipped = false
-        for (frame in 1_000 until 8_000) {
-            val value = sample(data, frame * 2)
-            if (frame / 1_000 % 2 == 1 && value == 32_767) positiveClipped = true
-            if (frame / 1_000 % 2 == 0 && value == -32_768) negativeClipped = true
-        }
-        assertTrue("positive transients saturate", positiveClipped)
-        assertTrue("negative transients saturate", negativeClipped)
+        assertTrue("The transient reaches protection without overflow", peak(data) in 32_600..PEAK_CEILING)
+        assertTrue("Settled positive steps do not wrap negative", sample(data, 1_800 * 2) > 20_000)
+        assertTrue("Settled negative steps do not wrap positive", sample(data, 2_800 * 2) < -20_000)
     }
 
     private fun processor(settings: EqualizerSettings, channels: Int = 1, rate: Int = 48_000): Pcm16Equalizer {
@@ -164,8 +217,8 @@ class Pcm16EqualizerTest {
         return Pcm16Equalizer(rate, channels) { immutable }
     }
 
-    private fun tone(frequency: Double, amplitude: Int = 10_000): ByteArray = pcm(48_000) { frame, _ ->
-        (amplitude * sin(2 * PI * frequency * frame / 48_000)).roundToInt()
+    private fun tone(frequency: Double, amplitude: Int = 10_000, frames: Int = 48_000, startFrame: Int = 0): ByteArray = pcm(frames) { frame, _ ->
+        (amplitude * sin(2 * PI * frequency * (frame + startFrame) / 48_000)).roundToInt()
     }
 
     private fun pcm(frames: Int, channels: Int = 1, value: (Int, Int) -> Int): ByteArray {
@@ -195,5 +248,13 @@ class Pcm16EqualizerTest {
         return largest
     }
 
+    private fun peak(data: ByteArray): Int {
+        var largest = 0
+        for (offset in data.indices step 2) largest = maxOf(largest, abs(sample(data, offset)))
+        return largest
+    }
+
     private fun Double.pow2() = this * this
+
+    private companion object { const val PEAK_CEILING = 32_700 }
 }

@@ -2,18 +2,19 @@ package com.carlink.core.audio
 
 import com.shilapi.xcertplay.media.HostAudio
 import kotlin.math.PI
+import kotlin.math.abs
 import kotlin.math.cos
-import kotlin.math.ln
+import kotlin.math.exp
 import kotlin.math.max
 import kotlin.math.pow
 import kotlin.math.roundToInt
 import kotlin.math.sin
-import kotlin.math.sqrt
 
 /**
  * Interleaved signed PCM16 little-endian. Owned and called by one renderer's audio thread.
  * Stable off/flat is byte-exact and O(1). The processing loop allocates nothing. Configuration
  * changes crossfade independent filter banks over 20ms rather than changing live IIR poles.
+ * Each bank limits actual sample peaks with one gain for both channels, without lookahead or a queue.
  */
 internal class Pcm16Equalizer(
     private val sampleRate: Int,
@@ -43,12 +44,14 @@ internal class Pcm16Equalizer(
         while (frame < end) {
             val blending = remainingFrames > 0
             val mix = if (blending) (transitionFrames - remainingFrames + 1).toDouble() / transitionFrames else 0.0
+            // Limit each bank before blending. A dry target must not inherit the wet bank's
+            // remaining gain reduction when a disable/reset transition reaches exact bypass.
+            val before = active.renderFrame(data, frame)
+            val after = if (blending) target.renderFrame(data, frame) else before
             for (channel in 0 until channels) {
                 val position = frame + channel * 2
-                val input = ((data[position].toInt() and 0xff) or (data[position + 1].toInt() shl 8)).toDouble()
-                val before = active.sample(input, channel)
-                val output = if (blending) before + (target.sample(input, channel) - before) * mix else before
-                // Reserve headroom for boosts, then saturate exceptional transients; never wrap PCM.
+                val output = if (blending) before[channel] + (after[channel] - before[channel]) * mix else before[channel]
+                // Final finite/saturation guard; the linked bank limiter handles over-range peaks.
                 val value = if (output.isFinite()) output.coerceIn(-32768.0, 32767.0).roundToInt() else 0
                 data[position] = value.toByte()
                 data[position + 1] = (value shr 8).toByte()
@@ -64,17 +67,23 @@ internal class Pcm16Equalizer(
         }
     }
 
-    private class FilterBank(private val sampleRate: Int, channels: Int) {
+    private class FilterBank(private val sampleRate: Int, private val channels: Int) {
         private val coefficients = DoubleArray(BAND_COUNT * 5)
         private val history = DoubleArray(BAND_COUNT * 2 * channels)
         private val activeBands = IntArray(BAND_COUNT)
         private var activeBandCount = 0
         var bypass = true
             private set
-        private var headroom = 1.0
+        private val frame = DoubleArray(channels)
+        private val release = exp(-1.0 / (sampleRate * 0.100))
+        private val holdFrames = max(1, sampleRate / 100)
+        private var holdRemaining = 0
+        private var limiterGain = 1.0
 
         fun configure(settings: EqualizerSettings) {
             history.fill(0.0)
+            limiterGain = 1.0
+            holdRemaining = 0
             bypass = true
             activeBandCount = 0
             for (band in 0 until BAND_COUNT) {
@@ -98,25 +107,39 @@ internal class Pcm16Equalizer(
                 coefficients[base + 3] = -2.0 * cosine / a0
                 coefficients[base + 4] = (1.0 - alpha / amplitude) / a0
             }
-            headroom = 1.0
-            if (!bypass) {
-                // Check the cascade, including band centers. Unlike summing all positive gains,
-                // this avoids excessive attenuation when several distant bands are boosted.
-                var peak = 1.0
-                val highest = sampleRate * 0.499
-                val ratio = highest / 10.0
-                for (probe in 0..128) peak = max(peak, magnitude(10.0 * ratio.pow(probe / 128.0)))
-                for (band in 0 until BAND_COUNT) {
-                    val frequency = BAND_FREQUENCIES_HZ[band].toDouble()
-                    if (frequency < highest) peak = max(peak, magnitude(frequency))
-                }
-                if (peak > 1.000001) headroom = 10.0.pow(-0.5 / 20.0) / peak
-            }
         }
 
-        fun sample(input: Double, channel: Int): Double {
+        /** Reused current-frame scratch, not queued audio. Read both channels before writing PCM. */
+        fun renderFrame(data: ByteArray, offset: Int): DoubleArray {
+            var peak = 0.0
+            for (channel in 0 until channels) {
+                val position = offset + channel * 2
+                val input = ((data[position].toInt() and 0xff) or (data[position + 1].toInt() shl 8)).toDouble()
+                val filtered = sample(input, channel)
+                val value = if (filtered.isFinite()) filtered else 0.0
+                frame[channel] = value
+                peak = max(peak, abs(value))
+            }
+            if (!bypass) {
+                // Preserve unity until a real filtered peak needs attenuation. No theoretical
+                // preamp cut or automatic makeup gain; one detector preserves stereo balance.
+                val requiredGain = if (peak > PEAK_CEILING) PEAK_CEILING / peak else 1.0
+                when {
+                    requiredGain < limiterGain -> {
+                        limiterGain = requiredGain
+                        holdRemaining = holdFrames
+                    }
+                    holdRemaining > 0 -> holdRemaining--
+                    else -> limiterGain = requiredGain + (limiterGain - requiredGain) * release
+                }
+                for (channel in 0 until channels) frame[channel] *= limiterGain
+            }
+            return frame
+        }
+
+        private fun sample(input: Double, channel: Int): Double {
             if (bypass) return input
-            var value = input * headroom
+            var value = input
             for (index in 0 until activeBandCount) {
                 val band = activeBands[index]
                 val base = band * 5
@@ -129,23 +152,8 @@ internal class Pcm16Equalizer(
             return value
         }
 
-        private fun magnitude(frequency: Double): Double {
-            val omega = 2.0 * PI * frequency / sampleRate
-            val c1 = cos(omega)
-            val s1 = sin(omega)
-            val c2 = cos(omega * 2.0)
-            val s2 = sin(omega * 2.0)
-            var squared = 1.0
-            for (index in 0 until activeBandCount) {
-                val band = activeBands[index]
-                val base = band * 5
-                val realB = coefficients[base] + coefficients[base + 1] * c1 + coefficients[base + 2] * c2
-                val imagB = coefficients[base + 1] * s1 + coefficients[base + 2] * s2
-                val realA = 1.0 + coefficients[base + 3] * c1 + coefficients[base + 4] * c2
-                val imagA = coefficients[base + 3] * s1 + coefficients[base + 4] * s2
-                squared *= (realB * realB + imagB * imagB) / (realA * realA + imagA * imagA)
-            }
-            return sqrt(squared)
+        private companion object {
+            const val PEAK_CEILING = 32_700.0
         }
     }
 }

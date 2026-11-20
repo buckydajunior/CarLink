@@ -22,8 +22,18 @@ The optional equalizer affects decoded CarPlay music/media only. Navigation prom
 calls and microphone audio bypass it. Five bands at 60/230/910/3600/14000 Hz offer ±12 dB in 1 dB
 steps. It starts Off and flat, applies adjustments when a slider is released, and keeps its enabled
 state when Reset to flat is pressed. Each audio renderer has independent filter history, with
-short crossfades on changes and automatic headroom for boosts. Stable Off/flat leaves PCM bytes
-unchanged. Unsupported formats bypass it; no global/system equalizer or new audio buffers are used.
+short crossfades on changes and stereo-linked protection for actual over-range sample peaks. Stable Off/flat leaves PCM bytes
+unchanged. Unsupported formats bypass it; no global/system equalizer or audio queue is added.
+
+Version 1.2.5 removes the static preamp cut that made the entire song quieter whenever a band was
+boosted. A single +6 dB band previously reduced unrelated audio by roughly 6.5 dB, even when the
+signal had ample room. Requested boosts now pass at their actual gain until output peaks require
+limiting. Both stereo channels share one instantaneous reduction per filter bank, with a 10 ms
+hold and 100 ms smooth release. Banks are limited before the 20 ms settings crossfade, so turning
+EQ Off or resetting to flat fades smoothly back to exact dry playback. There is no lookahead,
+automatic makeup gain or added audio queue. Large boosts on loud music can still trigger gain
+reduction; this is sample-peak protection, not transparent or true-peak mastering. Audible behavior
+and CPU use still need testing on the Linkswell.
 
 Settings > Call audio exposes the engine's experimental software echo canceller. It is **Off by
 default** in 1.2.4. A one-time migration turns off the default enabled by 1.2.3 without changing
