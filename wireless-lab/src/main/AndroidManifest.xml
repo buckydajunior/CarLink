@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- First build only reads capabilities. It never pairs, scans or changes a radio. -->
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
+    <uses-feature android:name="android.hardware.wifi" android:required="false" />
+    <uses-feature android:name="android.hardware.wifi.direct" android:required="false" />
+
+    <!-- Narrow visibility for read-only handler/candidate diagnostics on Android 11+. -->
+    <queries>
+        <intent><action android:name="android.settings.BLUETOOTH_SETTINGS" /></intent>
+        <intent><action android:name="android.settings.SETTINGS" /></intent>
+        <package android:name="com.android.settings" />
+        <package android:name="com.android.bluetooth" />
+        <package android:name="com.zjinnova.zlink" />
+        <package android:name="com.szchoiceway.btsuite" />
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.HOME" />
+        </intent>
+    </queries>
+
+    <application android:allowBackup="false" android:fullBackupContent="false"
+        android:icon="@drawable/carlink_lab_icon" android:label="@string/carlink_lab_app_name"
+        android:supportsRtl="true" android:theme="@style/Theme.CarLinkWirelessLab">
+        <activity android:name="com.carlink.wirelesslab.MainActivity" android:exported="true"
+            android:launchMode="singleTop">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <provider android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.reports" android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/carlink_lab_file_paths" />
+        </provider>
+    </application>
+</manifest>

@@ -40,3 +40,6 @@ include(":carplay-shared")
 project(":carplay-shared").projectDir = file("vendor/diplay/shared")
 include(":carplay-common")
 project(":carplay-common").projectDir = file("vendor/diplay/common")
+
+// Isolated wireless compatibility experiment; no dependency from the wired APK.
+include(":wireless-lab")
