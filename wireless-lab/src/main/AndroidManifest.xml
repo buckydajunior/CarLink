@@ -8,6 +8,13 @@
     <uses-feature android:name="android.hardware.wifi" android:required="false" />
     <uses-feature android:name="android.hardware.wifi.direct" android:required="false" />
 
+    <!-- Narrow visibility for read-only handler/candidate diagnostics on Android 11+. -->
+    <queries>
+        <intent><action android:name="android.settings.BLUETOOTH_SETTINGS" /></intent>
+        <intent><action android:name="android.settings.SETTINGS" /></intent>
+        <package android:name="com.android.settings" />
+    </queries>
+
     <application android:allowBackup="false" android:fullBackupContent="false"
         android:icon="@drawable/carlink_lab_icon" android:label="@string/carlink_lab_app_name"
         android:supportsRtl="true" android:theme="@style/Theme.CarLinkWirelessLab">

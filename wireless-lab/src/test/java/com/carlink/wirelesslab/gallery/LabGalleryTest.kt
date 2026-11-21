@@ -52,6 +52,8 @@ class LabGalleryTest {
                         Check.HARDWARE -> Reading.Text("rk30board")
                         Check.BUILD -> Reading.Text("rk3399-userdebug 8.1.0 OPM8.190605.005 eng.zxw.20220304.174223 test-keys")
                         Check.ABI -> Reading.Text("arm64-v8a")
+                        Check.BLUETOOTH_SETTINGS_HANDLER, Check.ANDROID_BLUETOOTH_PAGE ->
+                            Reading.Text("com.android.settings/.Settings\$BluetoothSettingsActivity")
                         Check.BLUETOOTH_ADAPTER -> Reading.Flag(false)
                         Check.BLUETOOTH_ENABLED, Check.BONDED_COUNT -> Reading.Unavailable
                         else -> Reading.Flag(true)

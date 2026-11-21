@@ -86,6 +86,27 @@ class CompatibilityProbeTest {
         assertEquals(Reading.NotChecked, result[Check.WIFI_5_GHZ])
     }
 
+    @Test fun settingsComponentsDoNotOverrideMissingRadioOrProveWirelessSupport() {
+        val report = CompatibilityProbe(object : Radios() {
+            override fun bluetoothAdapterPresent() = false
+            override fun bluetoothSettingsHandler() = "com.android.settings/.BluetoothSettings"
+            override fun androidBluetoothPage() = "com.android.settings/.Settings\$BluetoothSettingsActivity"
+        }).collect()
+        assertEquals(Reading.Flag(false), report.readings[Check.BLUETOOTH_ADAPTER])
+        assertEquals(Reading.Unavailable, report.readings[Check.BONDED_COUNT])
+        val formatted = report.format(RuntimeEnvironment.getApplication())
+        assertTrue(formatted.contains("Settings handlers may redirect internally"))
+        assertTrue(formatted.contains("does not prove a working Bluetooth stack"))
+    }
+
+    @Test fun hiddenSettingsQueriesLeaveOtherRadioChecksIntact() {
+        val result = CompatibilityProbe(Radios()).collect().readings
+        assertEquals(Reading.Unavailable, result[Check.BLUETOOTH_SETTINGS_HANDLER])
+        assertEquals(Reading.Unavailable, result[Check.ANDROID_BLUETOOTH_PAGE])
+        assertEquals(Reading.Flag(true), result[Check.BLUETOOTH_ADAPTER])
+        assertEquals(Reading.Text("1"), result[Check.BONDED_COUNT])
+    }
+
     @Test fun missingWifiServiceIsUnavailableRatherThanAnOffRadio() {
         val result = CompatibilityProbe(object : Radios() {
             override fun wifiServicePresent() = false

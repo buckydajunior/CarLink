@@ -39,9 +39,9 @@ class LabIsolationTest {
         assertTrue(activity.exported)
         assertEquals(ActivityInfo.LAUNCH_SINGLE_TOP, activity.launchMode)
         val info = manager.getPackageInfo(LAB_PACKAGE, 0)
-        assertEquals("0.1.0", info.versionName)
+        assertEquals("0.1.1", info.versionName)
         @Suppress("DEPRECATION")
-        assertEquals(100, info.versionCode)
+        assertEquals(101, info.versionCode)
     }
 
     @Test

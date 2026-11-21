@@ -23,13 +23,19 @@ class MainActivity : Activity() {
     @Volatile private var closed = false
     private var report: String? = null
     private var busy = false
+    private var resumed = false
+    private var refreshAfterSettings = false
+    private var lastSettingsRequest: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         report = savedInstanceState?.getString(REPORT)
+        refreshAfterSettings = savedInstanceState?.getBoolean(SETTINGS_RETURN) ?: false
+        lastSettingsRequest = savedInstanceState?.getString(SETTINGS_REQUEST)
         screen = LabScreen(this).apply {
             onCheck = ::checkWithPermission
             onShare = ::shareReport
+            onSettings = ::openBluetoothSettings
             onAbout = ::about
         }
         setContentView(screen)
@@ -42,6 +48,60 @@ class MainActivity : Activity() {
             screen.requestApplyInsets()
         }
         screen.showState(report, busy = false)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        resumed = true
+        if (refreshAfterSettings && !busy) {
+            refreshAfterSettings = false
+            collect() // Passive refresh only, after the user returns from the settings shortcut.
+        }
+    }
+
+    override fun onPause() {
+        resumed = false
+        super.onPause()
+    }
+
+    private fun openBluetoothSettings() {
+        if (busy) return
+        busy = true
+        screen.showState(report, true, R.string.carlink_lab_opening_settings)
+        worker.execute {
+            // Metadata lookup stays off the UI thread. Hidden query results must not prevent
+            // an otherwise permitted startActivity call on newer Android versions.
+            val plan = runCatching { BluetoothSettingsNavigation.inspect(packageManager) }
+                .getOrElse { SettingsPlan() }
+            deliver {
+                busy = false
+                if (!resumed) {
+                    screen.showState(report, false)
+                    return@deliver // Do not open a delayed settings page after the user leaves.
+                }
+                val result = BluetoothSettingsNavigation.launch(plan, ::startActivity)
+                val destination = getString(when (result.destination) {
+                    SettingsDestination.ANDROID_BLUETOOTH_PAGE -> R.string.carlink_lab_request_android_page
+                    SettingsDestination.BLUETOOTH_SHORTCUT -> R.string.carlink_lab_request_shortcut
+                    SettingsDestination.GENERAL_SETTINGS -> R.string.carlink_lab_request_general
+                    SettingsDestination.UNAVAILABLE -> R.string.carlink_lab_request_unavailable
+                })
+                lastSettingsRequest = getString(R.string.carlink_lab_last_settings_request, destination,
+                    result.component?.flattenToShortString() ?: getString(R.string.carlink_lab_implicit_target))
+                refreshAfterSettings = result.destination != SettingsDestination.UNAVAILABLE
+                screen.showState(report, false, when (result.destination) {
+                    SettingsDestination.ANDROID_BLUETOOTH_PAGE, SettingsDestination.BLUETOOTH_SHORTCUT ->
+                        R.string.carlink_lab_settings_return
+                    SettingsDestination.GENERAL_SETTINGS -> R.string.carlink_lab_settings_fallback
+                    SettingsDestination.UNAVAILABLE -> R.string.carlink_lab_settings_unavailable
+                })
+                if (result.destination == SettingsDestination.UNAVAILABLE) {
+                    // There will be no return/resume event. Capture the failed request now so
+                    // Share report immediately includes it, while keeping the failure status.
+                    collect(R.string.carlink_lab_settings_unavailable)
+                }
+            }
+        }
     }
 
     private fun checkWithPermission() {
@@ -59,16 +119,20 @@ class MainActivity : Activity() {
         if (requestCode == BLUETOOTH_REQUEST && !closed && !busy) collect()
     }
 
-    private fun collect() {
+    private fun collect(statusAfterSuccess: Int? = null) {
         busy = true
         screen.showState(report, busy = true)
+        val settingsRequest = lastSettingsRequest
         worker.execute {
-            val result = runCatching { CompatibilityProbe(AndroidRadioAccess(applicationContext)).collect().format(this) }
+            val result = runCatching {
+                CompatibilityProbe(AndroidRadioAccess(applicationContext)).collect().format(this) +
+                    (settingsRequest?.let { "\n$it\n" } ?: "")
+            }
             deliver {
                 busy = false
                 result.onSuccess { report = it }
                 screen.showState(report, busy = false,
-                    message = if (result.isFailure) R.string.carlink_lab_check_failed else null)
+                    message = if (result.isFailure) R.string.carlink_lab_check_failed else statusAfterSuccess)
             }
         }
     }
@@ -149,6 +213,8 @@ class MainActivity : Activity() {
 
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putString(REPORT, report)
+        outState.putBoolean(SETTINGS_RETURN, refreshAfterSettings)
+        outState.putString(SETTINGS_REQUEST, lastSettingsRequest)
         super.onSaveInstanceState(outState)
     }
 
@@ -161,5 +227,7 @@ class MainActivity : Activity() {
     private companion object {
         const val BLUETOOTH_REQUEST = 1
         const val REPORT = "compatibility_report"
+        const val SETTINGS_RETURN = "refresh_after_settings"
+        const val SETTINGS_REQUEST = "last_settings_request"
     }
 }

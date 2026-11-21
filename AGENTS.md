@@ -38,3 +38,12 @@ Preserve denied/unknown/error states and say what the check has not tested.
 No phone names, addresses, pairing keys, radio toggles or runtime authentication assets are needed.
 Run the lab's unit/manifest tests, debug/release builds and native layout renders before shipping
 its APK; the existing wired source/tests remain the v1.2.5 baseline unless explicitly changed.
+
+Wireless Lab 0.1.1 also offers an explicit Bluetooth settings navigation action because
+this unit's Connected devices menu omits Bluetooth. Validate enabled/exported known
+settings pages, permit the normal implicit shortcut even if metadata queries are
+hidden, and handle missing/security-blocked pages gracefully. Metadata reads stay
+on a worker; delayed navigation must not launch after the Activity loses visibility.
+Returning from the user-requested settings page may refresh passive results once.
+Report handler identities/request outcomes without claiming stock Bluetooth or
+working sockets; no radio toggles, scans, pairing or projection run from the lab.

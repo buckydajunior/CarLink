@@ -27,6 +27,8 @@ internal enum class Check(@param:StringRes val label: Int) {
     BLUETOOTH_ADAPTER(R.string.carlink_lab_bt_adapter),
     BLUETOOTH_ENABLED(R.string.carlink_lab_bt_enabled),
     BONDED_COUNT(R.string.carlink_lab_bond_count),
+    BLUETOOTH_SETTINGS_HANDLER(R.string.carlink_lab_bt_settings_handler),
+    ANDROID_BLUETOOTH_PAGE(R.string.carlink_lab_android_bt_page),
     WIFI_FEATURE(R.string.carlink_lab_wifi_feature),
     WIFI_SERVICE(R.string.carlink_lab_wifi_service),
     WIFI_ENABLED(R.string.carlink_lab_wifi_enabled),

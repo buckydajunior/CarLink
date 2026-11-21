@@ -17,6 +17,8 @@ internal interface RadioAccess {
     fun bluetoothAdapterPresent(): Boolean
     fun bluetoothEnabled(): Boolean
     fun bondedCount(): Int
+    fun bluetoothSettingsHandler(): String? = null
+    fun androidBluetoothPage(): String? = null
     fun wifiFeature(): Boolean
     fun wifiServicePresent(): Boolean
     fun wifiEnabled(): Boolean
@@ -31,6 +33,7 @@ internal class AndroidRadioAccess(context: Context) : RadioAccess {
     private val manager = app.packageManager
     // Initialized only on the worker, not while the screen is opening.
     private val bluetooth by lazy { app.getSystemService(BluetoothManager::class.java)?.adapter }
+    private val settingsPlan by lazy { BluetoothSettingsNavigation.inspect(manager) }
     private val wifi by lazy { app.getSystemService(WifiManager::class.java) }
 
     override fun deviceInfo() = linkedMapOf(
@@ -51,6 +54,8 @@ internal class AndroidRadioAccess(context: Context) : RadioAccess {
     override fun bluetoothEnabled() = requireNotNull(bluetooth).isEnabled
     // Count only: never read a BluetoothDevice's name, address or UUIDs.
     override fun bondedCount() = requireNotNull(bluetooth).bondedDevices.size
+    override fun bluetoothSettingsHandler() = settingsPlan.shortcutHandler?.flattenToShortString()
+    override fun androidBluetoothPage() = settingsPlan.bluetoothPages.firstOrNull()?.flattenToShortString()
     override fun wifiFeature() = manager.hasSystemFeature(PackageManager.FEATURE_WIFI)
     override fun wifiServicePresent() = wifi != null
     override fun wifiEnabled() = requireNotNull(wifi).isWifiEnabled
@@ -86,6 +91,12 @@ internal class CompatibilityProbe(private val radios: RadioAccess) {
             values[Check.BLUETOOTH_ENABLED] == Reading.Flag(false) -> Reading.NotChecked
             values[Check.BLUETOOTH_ENABLED] != Reading.Flag(true) -> Reading.NotChecked
             else -> capture { Reading.Text(radios.bondedCount().toString()) }
+        }
+        values[Check.BLUETOOTH_SETTINGS_HANDLER] = capture {
+            radios.bluetoothSettingsHandler()?.let(Reading::Text) ?: Reading.Unavailable
+        }
+        values[Check.ANDROID_BLUETOOTH_PAGE] = capture {
+            radios.androidBluetoothPage()?.let(Reading::Text) ?: Reading.Unavailable
         }
         flag(Check.WIFI_FEATURE, radios::wifiFeature)
         flag(Check.WIFI_SERVICE, radios::wifiServicePresent)

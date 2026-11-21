@@ -11,8 +11,8 @@
     <string name="carlink_lab_about">About &amp; licenses</string>
     <string name="carlink_lab_initial_note">This first build collects a report. It does not connect CarPlay yet. Your wired app stays separate.</string>
     <string name="carlink_lab_next">Share this report so we can choose the next connection test.</string>
-    <string name="carlink_lab_limits">Not tested: Bluetooth socket connections, hotspot creation, iPhone pairing, authentication or a CarPlay session. Firmware feature flags and adapter presence do not prove wireless CarPlay works. A zero paired-device count does not prove Linkswell has a separate radio. Wi-Fi 5 GHz support does not prove a 5 GHz hotspot is available.</string>
-    <string name="carlink_lab_privacy">Report includes device/build details and capability results. Phone names, Bluetooth addresses, Wi-Fi names, pairing keys, IMEI and serial numbers are not collected.</string>
+    <string name="carlink_lab_limits">Not tested: Bluetooth socket connections, hotspot creation, iPhone pairing, authentication or a CarPlay session. Firmware feature flags and adapter presence do not prove wireless CarPlay works. A zero paired-device count does not prove Linkswell has a separate radio. Wi-Fi 5 GHz support does not prove a 5 GHz hotspot is available. Settings handlers may redirect internally; a settings component does not prove a working Bluetooth stack. An unreported handler may still accept the shortcut.</string>
+    <string name="carlink_lab_privacy">Report includes device/build details, capability results and settings component names. Phone names, Bluetooth addresses, Wi-Fi names, pairing keys, IMEI and serial numbers are not collected.</string>
     <string name="carlink_lab_report_title">F-150 Wireless Lab %1$s — compatibility report</string>
     <string name="carlink_lab_report_scope">Passive Android checks only; radios and pairings are not changed.</string>
     <string name="carlink_lab_android">Android</string>
@@ -50,4 +50,18 @@
     <string name="carlink_lab_notices">Component notices</string>
     <string name="carlink_lab_license_failed">Could not read the bundled license.</string>
     <string name="carlink_lab_close">Close</string>
+    <string name="carlink_lab_open_bluetooth">Open Bluetooth page</string>
+    <string name="carlink_lab_pair_help">Try the Bluetooth page directly, even if its menu is hidden. Pair your iPhone there, then return here.</string>
+    <string name="carlink_lab_opening_settings">Opening Bluetooth settings…</string>
+    <string name="carlink_lab_settings_return">Return here after pairing. The report will refresh.</string>
+    <string name="carlink_lab_settings_fallback">Bluetooth page unavailable; main settings opened.</string>
+    <string name="carlink_lab_settings_unavailable">This firmware did not allow either settings page to open.</string>
+    <string name="carlink_lab_bt_settings_handler">Bluetooth settings shortcut handler reported</string>
+    <string name="carlink_lab_android_bt_page">Exported Android Bluetooth page reported</string>
+    <string name="carlink_lab_last_settings_request">Last settings start request: %1$s; reported target: %2$s</string>
+    <string name="carlink_lab_request_android_page">Android Bluetooth page</string>
+    <string name="carlink_lab_request_shortcut">System Bluetooth shortcut</string>
+    <string name="carlink_lab_request_general">Main settings fallback</string>
+    <string name="carlink_lab_request_unavailable">No settings page accepted the request</string>
+    <string name="carlink_lab_implicit_target">Implicit / not reported</string>
 </resources>

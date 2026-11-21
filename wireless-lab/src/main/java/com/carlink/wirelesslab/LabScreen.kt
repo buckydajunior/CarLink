@@ -24,10 +24,12 @@ internal class LabScreen(context: Context) : ScrollView(context) {
     private val status: TextView
     private val check: Button
     private val share: Button
+    private val settings: Button
     private val note: TextView
     private val report: TextView
     var onCheck: () -> Unit = {}
     var onShare: () -> Unit = {}
+    var onSettings: () -> Unit = {}
     var onAbout: () -> Unit = {}
 
     init {
@@ -44,6 +46,8 @@ internal class LabScreen(context: Context) : ScrollView(context) {
             setTypeface(typeface, Typeface.BOLD)
         }
         check = action(R.string.carlink_lab_check, primary = true) { onCheck() }
+        settings = action(R.string.carlink_lab_open_bluetooth) { onSettings() }
+        text(context.getString(R.string.carlink_lab_pair_help), bodySize, muted, 14)
         share = action(R.string.carlink_lab_share) { onShare() }
         note = text(context.getString(R.string.carlink_lab_initial_note), bodySize, muted, 20)
         report = text("", if (car) 22f else 17f, ink, 24).apply {
@@ -56,6 +60,8 @@ internal class LabScreen(context: Context) : ScrollView(context) {
     }
 
     fun showState(reportText: String?, busy: Boolean, message: Int? = null) {
+        settings.isEnabled = !busy
+        settings.alpha = if (busy) 0.45f else 1f
         check.isEnabled = !busy
         check.alpha = if (busy) 0.45f else 1f
         check.setText(if (reportText == null) R.string.carlink_lab_check else R.string.carlink_lab_check_again)
