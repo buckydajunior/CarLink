@@ -24,3 +24,17 @@ The product targets a 2018 Ford F-150 Lariat with an unspecified Linkswell model
 - Do not tag or publish a release unless the user requests it. Original maintainer devices,
   private paths and main-branch push instructions in upstream development notes are historical,
   not this user's environment or authorization.
+
+
+## Separate wireless experiment
+
+The user authorized `:wireless-lab` on branch `f150-wireless-lab`, based on wired v1.2.5.
+It has its own package (`com.buckydajunior.carlink.f150.wirelesslab`) and launcher name.
+The initial APK is a read-only compatibility check, not a wireless projection receiver.
+Do not alter `:app`/`:carlink-core`, claim USB/boot events, run another projection session,
+or enable radios, scan, create a hotspot or pair/connect automatically from this initial checker.
+Feature/adapter presence is not proof of usable Bluetooth sockets or a working CarPlay session.
+Preserve denied/unknown/error states and say what the check has not tested.
+No phone names, addresses, pairing keys, radio toggles or runtime authentication assets are needed.
+Run the lab's unit/manifest tests, debug/release builds and native layout renders before shipping
+its APK; the existing wired source/tests remain the v1.2.5 baseline unless explicitly changed.
