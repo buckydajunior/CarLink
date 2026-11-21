@@ -58,4 +58,24 @@
     <string name="carlink_f150_idle_connected">Connected</string>
     <string name="carlink_f150_idle_vehicle">F-150  /  LARIAT</string>
     <string name="carlink_f150_idle_usb">USB CARPLAY</string>
+    <string name="carlink_f150_eq_ten_bands">10 bands · CarPlay music</string>
+    <string name="carlink_f150_eq_bass">Bass</string>
+    <string name="carlink_f150_eq_mids">Mids</string>
+    <string name="carlink_f150_eq_treble">Treble</string>
+    <string name="carlink_f150_eq_sub_bass">Deep bass</string>
+    <string name="carlink_f150_eq_upper_bass">Upper bass</string>
+    <string name="carlink_f150_eq_low_mids">Low mids</string>
+    <string name="carlink_f150_eq_vocals">Vocals / mids</string>
+    <string name="carlink_f150_eq_upper_mids">Upper mids</string>
+    <string name="carlink_f150_eq_highs">Highs / presence</string>
+    <string name="carlink_f150_eq_air">Air / high treble</string>
+    <string name="carlink_f150_eq_curve_hint">Bars follow the music. Tap a frequency, then drag its point or use the slider. Release to apply.</string>
+    <string name="carlink_f150_eq_curve_description">Music level bars behind equalizer settings, from bass to treble. The line and numbers show EQ gain in decibels.</string>
+    <string name="carlink_f150_eq_band_description">%1$s, %2$s, %3$s</string>
+    <string name="carlink_f150_eq_short_db">%1$+d</string>
+    <string name="carlink_f150_eq_previous">Previous band</string>
+    <string name="carlink_f150_eq_next">Next band</string>
+    <string name="carlink_f150_eq_gain_legend">Line: EQ gain · ±12 dB</string>
+    <string name="carlink_f150_eq_live_legend">Bars: live music levels</string>
+    <string name="carlink_f150_eq_live_waiting">Play CarPlay music for live levels</string>
 </resources>

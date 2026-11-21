@@ -29,7 +29,15 @@ fun f150Entries() = listOf(
     },
     GalleryEntry("settings") { WiredSettingsContent(180) },
     GalleryEntry("settings-bars") { WiredSettingsContent(180, bars = SystemBarVisibility(true, true)) },
-    GalleryEntry("equalizer") { EqualizerContent(EqualizerSettings(true, listOf(3f, 1f, 0f, -2f, 2f))) },
+    // Synthetic live-level fixture for layout; real levels come from post-EQ PCM.
+    GalleryEntry("equalizer") { EqualizerContent(
+        EqualizerSettings(true, listOf(2f, 3f, 1f, 0f, -1f, 0f, -2f, 1f, 2f, 1f)),
+        liveLevelsDbFs = { listOf(-36f, -20f, -24f, -16f, -22f, -28f, -20f, -30f, -37f, -42f) },
+        liveAudio = { true }) },
+    GalleryEntry("equalizer-extreme") { EqualizerContent(
+        EqualizerSettings(true, List(10) { if (it % 2 == 0) 12f else -12f }),
+        liveLevelsDbFs = { List(10) { -12f - it * 2f } }, liveAudio = { true }) },
+    GalleryEntry("equalizer-waiting") { EqualizerContent(EqualizerSettings(true)) },
     GalleryEntry("equalizer-off") { EqualizerContent(EqualizerSettings()) },
     GalleryEntry("call-audio") { CallAudioContent(true) },
     GalleryEntry("call-audio-off") { CallAudioContent(false) },

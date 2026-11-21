@@ -15,6 +15,7 @@ import kotlin.math.sin
  * Stable off/flat is byte-exact and O(1). The processing loop allocates nothing. Configuration
  * changes crossfade independent filter banks over 20ms rather than changing live IIR poles.
  * Each bank limits actual sample peaks with one gain for both channels, without lookahead or a queue.
+ * Ten independent band slots share the same path; only nonzero bands below Nyquist run per sample.
  */
 internal class Pcm16Equalizer(
     private val sampleRate: Int,

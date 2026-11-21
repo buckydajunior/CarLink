@@ -11,7 +11,7 @@ The app has one launcher icon and one visible recent-apps card. Projection keeps
 task so opening Settings preserves the running phone connection; Open CarPlay returns to it.
 
 Settings has independent tablet status-bar and bottom-bar/dock switches (either, both or neither),
-a five-band music equalizer, call echo control, larger projected CarPlay icon presets, connection-log export, source
+a ten-band music equalizer, call echo control, larger projected CarPlay icon presets, connection-log export, source
 credits and complete licenses. Bar changes apply on return to CarPlay using the engine's existing
 inset handling and may briefly reconnect it; the bottom bar is Android's navigation/taskbar, subject
 to the Linkswell firmware.
@@ -19,13 +19,29 @@ Extra large is the default projected size; unplug and reconnect after changing i
 stays unchanged.
 
 The optional equalizer affects decoded CarPlay music/media only. Navigation prompts, Siri, phone
-calls and microphone audio bypass it. Five bands at 60/230/910/3600/14000 Hz offer ±12 dB in 1 dB
-steps. It starts Off and flat, applies adjustments when a slider is released, and keeps its enabled
+calls and microphone audio bypass it. Ten bands at 32/63/125/250/500/1000/2000/4000/8000/16000 Hz
+have names from Deep bass through Mids, Highs and Treble, with ±12 dB in 1 dB steps. A touchable
+curve and ten frequency/gain readouts show every control level at once; select or drag a point,
+or use the large selected-band slider and Previous/Next buttons. The curve previews band settings,
+not the combined filter response. Bars behind it show real post-EQ CarPlay music levels in the
+same ten frequency ranges, including when EQ is Off. The two displays have separate scales:
+EQ gain is ±12 dB; music bars use relative level (-60..0 dBFS internally). Edits apply on release.
+It starts Off and flat and keeps its enabled
 state when Reset to flat is pressed. Each audio renderer has independent filter history, with
 short crossfades on changes and stereo-linked protection for actual over-range sample peaks. Stable Off/flat leaves PCM bytes
 unchanged. Unsupported formats bypass it; no global/system equalizer or audio queue is added.
 
-Version 1.2.5 removes the static preamp cut that made the entire song quieter whenever a band was
+Version 1.3.0 expands the EQ and migrates the previous five gains to their nearest new centers:
+60→63, 230→250, 910→1000, 3600→4000 and 14000→16000 Hz. The five inserted bands stay flat and
+On/Off is preserved. The shifted centers approximate the former tuning; they are not an identical
+frequency response. Frequency-named settings and a schema marker prevent repeated index migration.
+The live analyzer subscribes only while the EQ screen is visible. PCM is copied into a bounded,
+nonblocking capture slot; a separate worker performs spectral analysis and publishes roughly ten
+updates per second. Idle/stopped music clears the display. No microphone, recording file or added
+playback queue is used, and no analyzer runs during startup or on other screens. Only nonzero EQ
+bands run. The expanded DSP, visual reaction and CPU use need verification on the Linkswell.
+
+Version 1.2.5 removed the static preamp cut that made the entire song quieter whenever a band was
 boosted. A single +6 dB band previously reduced unrelated audio by roughly 6.5 dB, even when the
 signal had ample room. Requested boosts now pass at their actual gain until output peaks require
 limiting. Both stereo channels share one instantaneous reduction per filter bank, with a 10 ms

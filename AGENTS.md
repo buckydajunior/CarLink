@@ -17,6 +17,10 @@ The product targets a 2018 Ford F-150 Lariat with an unspecified Linkswell model
   locally for testing. The helper respects caller `JAVA_HOME`, `ANDROID_HOME` and explicit `CARLINK_DEVICE`.
 - Render UI changes with `:app:recordScreenshots` at head-unit and phone sizes and inspect the images.
   State plainly when USB, calls, ignition reconnect and projected sizing have not been tested on the truck.
+- Music EQ has ten frequency-keyed bands; migrate old five-band settings once without treating
+  old indexes as new indexes. Preserve byte-exact Off/flat and stereo-linked peak limiting.
+  Live music levels analyze post-EQ music only while the EQ page is visible/STARTED. Keep transforms
+  off the audio callback, capture bounded/nonblocking, and idle/closed sessions free of stale levels.
 - Keep authentication assets and Android signing keys outside Git. Local test APKs may contain
   the verified public upstream experimental runtime identity; document that provenance.
 - Preserve GPL/AGPL, font licenses, component notices and original credits. Record actual engine
