@@ -47,3 +47,13 @@ on a worker; delayed navigation must not launch after the Activity loses visibil
 Returning from the user-requested settings page may refresh passive results once.
 Report handler identities/request outcomes without claiming stock Bluetooth or
 working sockets; no radio toggles, scans, pairing or projection run from the lab.
+
+Wireless Lab 0.1.2 may identify relevant installed app versions and declared services,
+including the default Home app, Android Bluetooth, ZLink and bounded name-matched
+candidates. Only ZLink's TD_CHANNEL_ID metadata is requested. Vendor-name matches
+are unverified fallbacks. Use public PackageManager APIs on the worker; narrow
+queries and explicit visibility/error/truncation limits, no QUERY_ALL_PACKAGES.
+/dev/rf_serial may be checked for existence/read/write permission metadata only:
+NEVER open/read/write it or contact/bind OEM services in this reporter. Keep vendor
+APKs and user photos outside Git. The user's working OEM Bluetooth connection is
+not visible through the Android pairing page; do not request another pairing test.

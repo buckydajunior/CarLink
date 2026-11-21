@@ -125,7 +125,9 @@ class MainActivity : Activity() {
         val settingsRequest = lastSettingsRequest
         worker.execute {
             val result = runCatching {
-                CompatibilityProbe(AndroidRadioAccess(applicationContext)).collect().format(this) +
+                val readings = CompatibilityProbe(AndroidRadioAccess(applicationContext)).collect().readings +
+                    OemBluetoothInspection(applicationContext).collect()
+                CompatibilityReport(readings).format(this) +
                     (settingsRequest?.let { "\n$it\n" } ?: "")
             }
             deliver {

@@ -5,6 +5,7 @@ import android.graphics.Canvas
 import android.os.Looper
 import android.view.View
 import android.view.ViewGroup
+import android.widget.TextView
 import com.carlink.wirelesslab.Check
 import com.carlink.wirelesslab.CompatibilityReport
 import com.carlink.wirelesslab.LabScreen
@@ -56,6 +57,12 @@ class LabGalleryTest {
                             Reading.Text("com.android.settings/.Settings\$BluetoothSettingsActivity")
                         Check.BLUETOOTH_ADAPTER -> Reading.Flag(false)
                         Check.BLUETOOTH_ENABLED, Check.BONDED_COUNT -> Reading.Unavailable
+                        Check.OEM_HOME -> Reading.Text("com.example.linkswell/.HomeActivity")
+                        Check.OEM_APPS -> Reading.Text(activity.getString(com.carlink.wirelesslab.R.string.carlink_lab_oem_scope) +
+                            "\n\nBluetooth — com.example.linkswell.bt\nVersion: 1.0 (1); system app: Yes; app enabled: Yes\n" +
+                            "Service: com.example.linkswell.bt.BluetoothService; exported: No; declared enabled: Yes; permission: None declared")
+                        Check.OEM_SERIAL_NODE -> Reading.Text(activity.getString(com.carlink.wirelesslab.R.string.carlink_lab_node_metadata,
+                            "Yes", "No", "No"))
                         else -> Reading.Flag(true)
                     }
                 }
@@ -68,8 +75,20 @@ class LabGalleryTest {
                 view.scrollTo(0, view.getChildAt(0).height - view.height + view.paddingBottom)
                 shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(100))
                 save(decor, File(out, "lab_${name}_report_end.webp"))
+                val body = descendants(view).filterIsInstance<TextView>().single {
+                    it.text.startsWith("F-150 Wireless Lab") && it.text.contains("compatibility report")
+                }
+                val offset = body.text.indexOf(activity.getString(com.carlink.wirelesslab.R.string.carlink_lab_oem_home))
+                view.scrollTo(0, body.top + body.layout.getLineTop(body.layout.getLineForOffset(offset)))
+                shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(100))
+                save(decor, File(out, "lab_${name}_oem_report.webp"))
             }
         }
+    }
+
+    private fun descendants(view: View): Sequence<View> = sequence {
+        yield(view)
+        if (view is ViewGroup) for (i in 0 until view.childCount) yieldAll(descendants(view.getChildAt(i)))
     }
 
     private fun save(view: View, file: File) {

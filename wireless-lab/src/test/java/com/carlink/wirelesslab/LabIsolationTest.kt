@@ -39,9 +39,9 @@ class LabIsolationTest {
         assertTrue(activity.exported)
         assertEquals(ActivityInfo.LAUNCH_SINGLE_TOP, activity.launchMode)
         val info = manager.getPackageInfo(LAB_PACKAGE, 0)
-        assertEquals("0.1.1", info.versionName)
+        assertEquals("0.1.2", info.versionName)
         @Suppress("DEPRECATION")
-        assertEquals(101, info.versionCode)
+        assertEquals(102, info.versionCode)
     }
 
     @Test
@@ -66,6 +66,7 @@ class LabIsolationTest {
         }
         assertTrue(requested.contains(bluetoothPermission))
         assertFalse(requested.contains("android.permission.INTERNET"))
+        assertFalse(requested.contains("android.permission.QUERY_ALL_PACKAGES"))
         assertFalse(requested.contains("android.permission.RECEIVE_BOOT_COMPLETED"))
         assertFalse(requested.contains("android.permission.BLUETOOTH_SCAN"))
         assertFalse(requested.contains("android.permission.BLUETOOTH_ADVERTISE"))

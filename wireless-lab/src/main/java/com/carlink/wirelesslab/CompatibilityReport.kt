@@ -35,6 +35,9 @@ internal enum class Check(@param:StringRes val label: Int) {
     WIFI_5_GHZ(R.string.carlink_lab_wifi_5ghz),
     WIFI_DIRECT_FEATURE(R.string.carlink_lab_p2p_feature),
     WIFI_DIRECT_SERVICE(R.string.carlink_lab_p2p_service),
+    OEM_HOME(R.string.carlink_lab_oem_home),
+    OEM_APPS(R.string.carlink_lab_oem_apps),
+    OEM_SERIAL_NODE(R.string.carlink_lab_oem_serial),
 }
 
 internal data class CompatibilityReport(val readings: Map<Check, Reading>) {

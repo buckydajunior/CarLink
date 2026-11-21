@@ -1,18 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="carlink_lab_heading">Wireless compatibility</string>
-    <string name="carlink_lab_intro">First, check what Android exposes on your Linkswell.</string>
+    <string name="carlink_lab_intro">Identify the Bluetooth apps and services exposed by your Linkswell.</string>
     <string name="carlink_lab_ready">Ready to check</string>
-    <string name="carlink_lab_checking">Checking radios…</string>
-    <string name="carlink_lab_complete">Basic checks collected</string>
+    <string name="carlink_lab_checking">Checking radios and OEM apps…</string>
+    <string name="carlink_lab_complete">Compatibility report collected</string>
     <string name="carlink_lab_check">Check compatibility</string>
     <string name="carlink_lab_check_again">Check again</string>
     <string name="carlink_lab_share">Share report</string>
     <string name="carlink_lab_about">About &amp; licenses</string>
-    <string name="carlink_lab_initial_note">This first build collects a report. It does not connect CarPlay yet. Your wired app stays separate.</string>
+    <string name="carlink_lab_initial_note">This build collects a report. It does not connect CarPlay yet. Your wired app stays separate.</string>
     <string name="carlink_lab_next">Share this report so we can choose the next connection test.</string>
     <string name="carlink_lab_limits">Not tested: Bluetooth socket connections, hotspot creation, iPhone pairing, authentication or a CarPlay session. Firmware feature flags and adapter presence do not prove wireless CarPlay works. A zero paired-device count does not prove Linkswell has a separate radio. Wi-Fi 5 GHz support does not prove a 5 GHz hotspot is available. Settings handlers may redirect internally; a settings component does not prove a working Bluetooth stack. An unreported handler may still accept the shortcut.</string>
-    <string name="carlink_lab_privacy">Report includes device/build details, capability results and settings component names. Phone names, Bluetooth addresses, Wi-Fi names, pairing keys, IMEI and serial numbers are not collected.</string>
+    <string name="carlink_lab_privacy">Report includes device/build details, capability results, relevant app versions and declared service names. Only ZLink’s channel metadata is included; private app data and other metadata are not read. Phone names, Bluetooth addresses, Wi-Fi names, pairing keys, IMEI and serial numbers are not collected.</string>
     <string name="carlink_lab_report_title">F-150 Wireless Lab %1$s — compatibility report</string>
     <string name="carlink_lab_report_scope">Passive Android checks only; radios and pairings are not changed.</string>
     <string name="carlink_lab_android">Android</string>
@@ -50,10 +50,10 @@
     <string name="carlink_lab_notices">Component notices</string>
     <string name="carlink_lab_license_failed">Could not read the bundled license.</string>
     <string name="carlink_lab_close">Close</string>
-    <string name="carlink_lab_open_bluetooth">Open Bluetooth page</string>
-    <string name="carlink_lab_pair_help">Try the Bluetooth page directly, even if its menu is hidden. Pair your iPhone there, then return here.</string>
+    <string name="carlink_lab_open_bluetooth">Android Bluetooth page (optional)</string>
+    <string name="carlink_lab_pair_help">If the Linkswell Bluetooth app already connects but Android finds nothing, skip this page. Tap Check compatibility, then share the report.</string>
     <string name="carlink_lab_opening_settings">Opening Bluetooth settings…</string>
-    <string name="carlink_lab_settings_return">Return here after pairing. The report will refresh.</string>
+    <string name="carlink_lab_settings_return">Return here to refresh the report. You can skip this page if Android cannot find your phone.</string>
     <string name="carlink_lab_settings_fallback">Bluetooth page unavailable; main settings opened.</string>
     <string name="carlink_lab_settings_unavailable">This firmware did not allow either settings page to open.</string>
     <string name="carlink_lab_bt_settings_handler">Bluetooth settings shortcut handler reported</string>
@@ -64,4 +64,20 @@
     <string name="carlink_lab_request_general">Main settings fallback</string>
     <string name="carlink_lab_request_unavailable">No settings page accepted the request</string>
     <string name="carlink_lab_implicit_target">Implicit / not reported</string>
+    <string name="carlink_lab_oem_home">Default Home component</string>
+    <string name="carlink_lab_oem_apps">OEM / Bluetooth app candidates</string>
+    <string name="carlink_lab_oem_serial">/dev/rf_serial metadata (node never opened)</string>
+    <string name="carlink_lab_node_metadata">Visible: %1$s; readable: %2$s; writable: %3$s. Permission checks do not prove access or a usable transport; a hidden node can appear absent.</string>
+    <string name="carlink_lab_oem_scope">Package declarations only; no services contacted. Includes Android Bluetooth, ZLink, the default Home app and name-matched candidates (plus up to four vendor-name fallbacks). Candidates are not confirmed Bluetooth interfaces. Android package visibility may hide apps. Service enabled/exported declarations do not prove access, grants or availability.</string>
+    <string name="carlink_lab_oem_package">%1$s — %2$s\nVersion: %3$s (%4$s); system app: %5$s; app enabled: %6$s</string>
+    <string name="carlink_lab_oem_channel">TD_CHANNEL_ID: %1$s</string>
+    <string name="carlink_lab_oem_not_reported">Not reported</string>
+    <string name="carlink_lab_oem_no_services">No declared services reported.</string>
+    <string name="carlink_lab_oem_service">Service: %1$s; exported: %2$s; declared enabled: %3$s; permission: %4$s</string>
+    <string name="carlink_lab_oem_none">None declared</string>
+    <string name="carlink_lab_oem_missing_package">%1$s: not installed or not visible.</string>
+    <string name="carlink_lab_oem_package_denied">%1$s: package inspection denied.</string>
+    <string name="carlink_lab_oem_package_error">%1$s: package inspection failed (%2$s).</string>
+    <string name="carlink_lab_oem_truncated">Additional candidates or services omitted to keep this report bounded.</string>
+    <string name="carlink_lab_oem_enumeration_error">Additional app candidates could not be listed (%1$s). Known package checks are retained.</string>
 </resources>

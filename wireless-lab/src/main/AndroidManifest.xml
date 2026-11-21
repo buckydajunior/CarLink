@@ -13,6 +13,12 @@
         <intent><action android:name="android.settings.BLUETOOTH_SETTINGS" /></intent>
         <intent><action android:name="android.settings.SETTINGS" /></intent>
         <package android:name="com.android.settings" />
+        <package android:name="com.android.bluetooth" />
+        <package android:name="com.zjinnova.zlink" />
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.HOME" />
+        </intent>
     </queries>
 
     <application android:allowBackup="false" android:fullBackupContent="false"
