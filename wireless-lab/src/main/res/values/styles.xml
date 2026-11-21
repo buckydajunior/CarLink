@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.CarLinkWirelessLab" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:colorAccent">#64D9E6</item>
+        <item name="android:windowBackground">#08151F</item>
+        <item name="android:colorBackground">#08151F</item>
+        <item name="android:statusBarColor">#08151F</item>
+        <item name="android:navigationBarColor">#08151F</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowActionModeOverlay">true</item>
+    </style>
+</resources>
