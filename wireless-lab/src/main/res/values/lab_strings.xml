@@ -80,4 +80,17 @@
     <string name="carlink_lab_oem_package_error">%1$s: package inspection failed (%2$s).</string>
     <string name="carlink_lab_oem_truncated">Additional candidates or services omitted to keep this report bounded.</string>
     <string name="carlink_lab_oem_enumeration_error">Additional app candidates could not be listed (%1$s). Known package checks are retained.</string>
+    <string name="carlink_lab_export">Export Bluetooth app APK</string>
+    <string name="carlink_lab_export_help">Identified Linkswell Bluetooth? Export its installed APK for inspection. This copies app code only; it does not include pairings or call history.</string>
+    <string name="carlink_lab_export_preparing">Preparing Bluetooth APK copy…</string>
+    <string name="carlink_lab_export_ready">Bluetooth APK copy ready</string>
+    <string name="carlink_lab_export_description">The ZIP contains the installed Linkswell Bluetooth app APK and its version/checksums. Save it to a USB drive or share it for inspection. Private app data, pairings and call history are excluded.</string>
+    <string name="carlink_lab_export_save">Save ZIP</string>
+    <string name="carlink_lab_export_share">Share ZIP</string>
+    <string name="carlink_lab_export_missing">The Linkswell Bluetooth package is not installed or visible. The compatibility report is still available.</string>
+    <string name="carlink_lab_export_failed">Could not copy the installed Bluetooth APK. No Bluetooth connection or settings were changed.</string>
+    <string name="carlink_lab_export_save_unavailable">Android could not open the save picker. Tap Export Bluetooth app APK again and choose Share ZIP.</string>
+    <string name="carlink_lab_export_saving">Saving Bluetooth APK ZIP…</string>
+    <string name="carlink_lab_export_saved">ZIP saved. Return the file for inspection.</string>
+    <string name="carlink_lab_export_save_failed">Saving did not finish. Try saving again; an incomplete file may remain at the destination.</string>
 </resources>

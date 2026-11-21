@@ -57,3 +57,12 @@ queries and explicit visibility/error/truncation limits, no QUERY_ALL_PACKAGES.
 NEVER open/read/write it or contact/bind OEM services in this reporter. Keep vendor
 APKs and user photos outside Git. The user's working OEM Bluetooth connection is
 not visible through the Android pairing page; do not request another pairing test.
+
+Wireless Lab 0.1.3 may explicitly export only com.szchoiceway.btsuite's public
+installed base/split APK files using PackageManager sourceDir/splitSourceDirs.
+Keep size/count bounds, generated ZIP names, path-free version/hash metadata and
+private-cache retention. Never read dataDir, contacts/call providers or pairings.
+User selects Save ZIP via ACTION_CREATE_DOCUMENT or Share ZIP via explicit chooser;
+no automatic recipient/upload, extra storage permission, bind, scan or serial open.
+Suppress delayed export UI after pause; preserve pending filename across recreation.
+Returned vendor code remains outside Git for static inspection only.

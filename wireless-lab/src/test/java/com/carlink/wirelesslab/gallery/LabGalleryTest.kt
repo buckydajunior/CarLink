@@ -2,6 +2,8 @@ package com.carlink.wirelesslab.gallery
 
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.content.pm.ApplicationInfo
+import android.content.pm.PackageInfo
 import android.os.Looper
 import android.view.View
 import android.view.ViewGroup
@@ -11,6 +13,8 @@ import com.carlink.wirelesslab.CompatibilityReport
 import com.carlink.wirelesslab.LabScreen
 import com.carlink.wirelesslab.MainActivity
 import com.carlink.wirelesslab.Reading
+import com.carlink.wirelesslab.BluetoothAppExport
+import com.carlink.wirelesslab.resetReportProviderCache
 import java.io.File
 import java.time.Duration
 import org.junit.Assert.assertTrue
@@ -23,6 +27,7 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import org.robolectric.shadows.ShadowAlertDialog
 
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -30,6 +35,7 @@ import org.robolectric.annotation.GraphicsMode
 class LabGalleryTest {
     @Test fun renderNativeLayouts() {
         assumeTrue(System.getProperty("carlink.lab.screenshots") == "true")
+        resetReportProviderCache()
         val out = File(System.getProperty("carlink.repoRoot"), "docs/screenshots/wireless-lab").apply { mkdirs() }
         for ((name, qualifiers) in listOf(
             "headunit" to "w1024dp-h600dp-land-mdpi",
@@ -44,6 +50,26 @@ class LabGalleryTest {
                 val decor = activity.window.decorView
                 assertTrue(decor.width > 0 && decor.height > 0)
                 save(decor, File(out, "lab_${name}_ready.webp"))
+                val apk = File(activity.filesDir, "gallery-code.apk").apply { writeText("SYNTHETIC_CODE_FIXTURE") }
+                shadowOf(activity.packageManager).installPackage(PackageInfo().apply {
+                    packageName = BluetoothAppExport.PACKAGE
+                    versionName = "1.0"
+                    applicationInfo = ApplicationInfo().apply {
+                        packageName = BluetoothAppExport.PACKAGE
+                        sourceDir = apk.path
+                    }
+                })
+                view.onExport()
+                val deadline = System.nanoTime() + 5_000_000_000L
+                while (ShadowAlertDialog.getLatestAlertDialog()?.isShowing != true && System.nanoTime() < deadline) {
+                    shadowOf(Looper.getMainLooper()).idle()
+                    Thread.sleep(5)
+                }
+                val dialog = requireNotNull(ShadowAlertDialog.getLatestAlertDialog())
+                assertTrue(dialog.isShowing)
+                shadowOf(Looper.getMainLooper()).idle()
+                save(dialog.window!!.decorView, File(out, "lab_${name}_export.webp"))
+                dialog.dismiss()
                 val fixture = Check.entries.associateWith { check ->
                     when (check) {
                         Check.ANDROID -> Reading.Text("8.1.0 / API 27")

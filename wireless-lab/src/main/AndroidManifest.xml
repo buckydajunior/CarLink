@@ -15,6 +15,7 @@
         <package android:name="com.android.settings" />
         <package android:name="com.android.bluetooth" />
         <package android:name="com.zjinnova.zlink" />
+        <package android:name="com.szchoiceway.btsuite" />
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.HOME" />

@@ -12,6 +12,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
+import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -22,6 +23,7 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [27, 33])
 class LabIsolationTest {
+    @Before fun resetProviderRoots() = resetReportProviderCache()
     private val context get() = RuntimeEnvironment.getApplication()
     private val manager get() = context.packageManager
 
@@ -39,9 +41,9 @@ class LabIsolationTest {
         assertTrue(activity.exported)
         assertEquals(ActivityInfo.LAUNCH_SINGLE_TOP, activity.launchMode)
         val info = manager.getPackageInfo(LAB_PACKAGE, 0)
-        assertEquals("0.1.2", info.versionName)
+        assertEquals("0.1.3", info.versionName)
         @Suppress("DEPRECATION")
-        assertEquals(102, info.versionCode)
+        assertEquals(103, info.versionCode)
     }
 
     @Test
@@ -144,4 +146,11 @@ class LabIsolationTest {
     private companion object {
         const val LAB_PACKAGE = "com.buckydajunior.carlink.f150.wirelesslab"
     }
+}
+
+/** AndroidX keeps static roots while Robolectric gives each test a new app data directory. */
+internal fun resetReportProviderCache() {
+    val field = FileProvider::class.java.getDeclaredField("sCache").apply { isAccessible = true }
+    val cache = field.get(null) as MutableMap<*, *>
+    synchronized(cache) { cache.clear() }
 }

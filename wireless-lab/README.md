@@ -4,12 +4,12 @@ A separate Android app for investigating wireless CarPlay on the user's 2018
 F-150 Linkswell. This branch starts from the wired v1.2.5 source, commit
 `76948d36b351b2a37ecdfd898307f0af00906df6`.
 
-**Version 0.1.2 is a read-only radio and OEM-app identification reporter, not a CarPlay receiver.**
+**Version 0.1.3 identifies radio/OEM apps and can export the installed Choiceway Bluetooth APK for inspection. It is not a CarPlay receiver.**
 The wired APK, its package, USB behavior, settings and EQ are unchanged.
 
 ## Install and use
 
-Install `F150-Wireless-Lab-0.1.2-test.apk`, then open **F-150 Wireless Lab** from
+Install `F150-Wireless-Lab-0.1.3-test.apk`, then open **F-150 Wireless Lab** from
 the Linkswell app list. Tap **Check compatibility**, then **Share report** and
 return the text file for review. If sharing isn't available on the head unit,
 the on-screen report is selectable and can also be photographed while scrolling.
@@ -21,6 +21,16 @@ that page. Tap **Check compatibility** and **Share report** instead. The optiona
 Android settings shortcut remains available for other diagnostic use; returning
 refreshes the passive report once. An accepted start request is not evidence of
 a usable Bluetooth stack.
+
+For the identified Choiceway Bluetooth app, tap **Export Bluetooth app APK**.
+Choose **Save ZIP** to select a USB-drive/file destination in Android's document
+picker, or **Share ZIP** to open the normal share chooser. Return the resulting
+`Linkswell-Bluetooth-code.zip` for offline inspection. A save-picker failure offers
+instructions to use Share instead; no automatic upload or recipient is selected.
+The action copies only the fixed `com.szchoiceway.btsuite` package's installed
+base/split APKs and public version/checksums. It does not open private app data,
+contacts, call history, pairing keys, radio devices or vendor services. The actual
+Bluetooth app is not disabled, replaced, updated or executed by the Lab.
 
 Android 8.1 uses the normal Bluetooth permission granted at installation. On
 Android 12 or newer, Check requests Bluetooth Connect permission; denied access
@@ -74,7 +84,7 @@ app inventory, private app files, phone names, Bluetooth MACs, Wi-Fi SSIDs/BSSID
 keys, IMEI, serial or Android ID. Binder failures retain only exception class
 names. Reports stay in private cache until the user explicitly opens Android's
 share chooser. Only `cache/reports/` can be shared through the provider, with a
-temporary read grant. At most five report files are kept; clear app data or
+temporary read grant. At most five text reports and two Bluetooth-code ZIPs are kept; clear app data or
 uninstall to remove them. No automatic upload exists (no Internet permission).
 
 ## Development
@@ -93,7 +103,7 @@ debug certificate; debug and release lab builds share one package and certificat
 The module does not need CarPlay authentication assets.
 
 Ordinary tests cover API 27/33 merged-manifest isolation and partial/denied/error
-reporting. Twelve native layout renders cover landscape head unit, portrait head
+reporting. Fifteen native layout renders cover landscape head unit, portrait head
 unit and phone; gallery report values are synthetic layout fixtures, not measured
 radio results. The earlier Android capability report and settings navigation were tested on the
 Linkswell. The new OEM-app report fields and wireless CarPlay remain unverified on
@@ -202,3 +212,53 @@ impractical; identification is a feasibility gate, not proof of wireless support
 - Both wired 1.3.0 APK hashes and previous Lab 0.1.1 APK hash are unchanged.
 - OEM identification has not yet run on the Linkswell. No Bluetooth connection,
   hotspot, authentication or wireless CarPlay success is claimed.
+
+## Choiceway identification — 2026-11-21
+
+The 0.1.2 photos identify default Home `com.choiceway.index/.Launcher`, Index 1.0(1),
+and Bluetooth `com.szchoiceway.btsuite` 1.0(1), both enabled system apps. Bluetooth's
+`com.szchoiceway.btsuite.BTService` is declared enabled/exported with no manifest
+permission. `/dev/rf_serial` is visible/readable/writable by metadata checks;
+**it has never been opened by Lab**. These observations identify a target but do
+not prove Binder access, serial ownership, usable raw receive/transmit, or iAP2.
+
+Standard `com.zjinnova.zlink` is not installed or visible; the report separately
+lists zlink-HiCar `com.zjinnova.hicar` 1.0.3(10003), whose presence does not establish
+Apple CarPlay support. Wi-Fi was off in this check, so 5GHz remains untested in it.
+There is still no reason to repeat standard Android discovery/pairing.
+
+A public client for a different Android13 GT6 device documents a Choiceway Binder
+but only implements hiding a call window, with normal-UID binding unverified
+([source](https://github.com/armeehn/device-reveng/blob/b5c07f620efbe7f615f0c36d87cae5fa9f4dfafa/launcher/carlib/src/main/java/com/ripostelabs/carlauncher/carlib/VendorBtService.kt)).
+It does not establish the raw receive path needed here. Inspect the exact installed
+Bluetooth APK before any bind, module command or serial-open experiment.
+
+The export uses only PackageManager's public sourceDir/splitSourceDirs, copies
+at most 16 APK files (32MiB each/64MiB total), hashes them and uses generated ZIP
+entry names. It never lists directories or reads dataDir. Interrupted/failed copies
+remove partial private-cache ZIPs; timestamp changes cannot prune the new archive.
+Save destinations require the user's ACTION_CREATE_DOCUMENT content URI; cancelled
+saves do nothing and failed writes report that an incomplete destination may remain.
+Only the prepared filename survives Activity recreation. A delayed preparation never
+opens a dialog/chooser after the Activity is paused. The returned APK/ZIP must stay
+outside Git and must not be installed, run, patched or redistributed by this work.
+
+## Version 0.1.3 validation — 2026-11-21
+
+- 89 ordinary API27/33 test executions passed, no failures/skips. Coverage includes
+  code-only export boundaries, checksums/splits, size bounds, cancellation cleanup,
+  timestamp-independent retention, scoped sharing, content-destination saving,
+  Activity recreation and suppression of delayed export UI after pause.
+- Debug, R8 release, release vital lint and full debug lint passed. A native gallery
+  runner generated 15 head-unit/portrait/phone renders; representative ready and
+  all three export-dialog layouts were inspected with readable, unclipped text.
+- Signed test APK: 121,812 bytes; SHA-256
+  `b832ccf2a8286541bf69ea7266316262cbb051ed9c4d1b5c12a54e102df05f1f`.
+  Alignment, V2/V3 signatures and the unchanged local test certificate passed.
+- Verified 0.1.3/103 package identity, unchanged read-only permissions, one launcher,
+  scoped report provider, exact Bluetooth-package query and no bundled vendor APK,
+  native/engine/auth assets. No release/tag published.
+- Both wired 1.3.0 APK hashes and previous Lab 0.1.2 APK hash are unchanged.
+- Export/Save/Share have not yet run on the Linkswell. A returned Bluetooth-code
+  ZIP is required for the next offline inspection; no Binder/serial connection,
+  hotspot, authentication or wireless CarPlay test has run.

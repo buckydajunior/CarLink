@@ -6,6 +6,7 @@ import android.app.AlertDialog
 import android.content.ClipData
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.view.WindowInsets
@@ -26,16 +27,19 @@ class MainActivity : Activity() {
     private var resumed = false
     private var refreshAfterSettings = false
     private var lastSettingsRequest: String? = null
+    private var pendingExportName: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         report = savedInstanceState?.getString(REPORT)
         refreshAfterSettings = savedInstanceState?.getBoolean(SETTINGS_RETURN) ?: false
         lastSettingsRequest = savedInstanceState?.getString(SETTINGS_REQUEST)
+        pendingExportName = savedInstanceState?.getString(EXPORT_NAME)
         screen = LabScreen(this).apply {
             onCheck = ::checkWithPermission
             onShare = ::shareReport
             onSettings = ::openBluetoothSettings
+            onExport = ::exportBluetoothApp
             onAbout = ::about
         }
         setContentView(screen)
@@ -150,6 +154,7 @@ class MainActivity : Activity() {
                 val file = File(dir, "compatibility-${System.currentTimeMillis()}.txt")
                 file.writeText(snapshot, Charsets.UTF_8)
                 dir.listFiles().orEmpty().filter { it != file }.sortedByDescending { it.lastModified() }
+                    .filter { it.extension == "txt" }
                     .drop(4).forEach { it.delete() }
                 FileProvider.getUriForFile(this, "$packageName.reports", file)
             }
@@ -157,19 +162,91 @@ class MainActivity : Activity() {
                 busy = false
                 screen.showState(report, busy = false)
                 result.onSuccess { uri ->
-                    val send = Intent(Intent.ACTION_SEND).apply {
-                        type = "text/plain"
-                        putExtra(Intent.EXTRA_STREAM, uri)
-                        clipData = ClipData.newRawUri(null, uri)
-                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                    }
-                    try {
-                        startActivity(Intent.createChooser(send, getString(R.string.carlink_lab_share_chooser)))
-                    } catch (_: Exception) {
-                        screen.showState(report, false, R.string.carlink_lab_share_failed)
-                    }
+                    if (resumed) share(uri, "text/plain", R.string.carlink_lab_share_chooser)
                 }.onFailure { screen.showState(report, false, R.string.carlink_lab_share_failed) }
             }
+        }
+    }
+
+    private fun exportBluetoothApp() {
+        if (busy) return
+        busy = true
+        screen.showState(report, true, R.string.carlink_lab_export_preparing)
+        worker.execute {
+            val result = runCatching {
+                val file = BluetoothAppExport.prepare(applicationContext)
+                file.name to FileProvider.getUriForFile(this, "$packageName.reports", file)
+            }
+            deliver {
+                busy = false
+                screen.showState(report, false, R.string.carlink_lab_export_ready)
+                result.onSuccess { (name, uri) ->
+                    pendingExportName = name
+                    if (!resumed) return@onSuccess // Never open a delayed chooser over another app.
+                    AlertDialog.Builder(this)
+                        .setTitle(R.string.carlink_lab_export)
+                        .setMessage(R.string.carlink_lab_export_description)
+                        .setPositiveButton(R.string.carlink_lab_export_save) { _, _ ->
+                            try {
+                                @Suppress("DEPRECATION")
+                                startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                                    addCategory(Intent.CATEGORY_OPENABLE)
+                                    type = "application/zip"
+                                    putExtra(Intent.EXTRA_TITLE, "Linkswell-Bluetooth-code.zip")
+                                }, SAVE_CODE)
+                            } catch (_: Exception) {
+                                screen.showState(report, false, R.string.carlink_lab_export_save_unavailable)
+                            }
+                        }
+                        .setNeutralButton(R.string.carlink_lab_export_share) { _, _ ->
+                            share(uri, "application/zip", R.string.carlink_lab_export)
+                        }
+                        .setNegativeButton(R.string.carlink_lab_close, null).show().apply {
+                            val car = resources.configuration.screenWidthDp >= 600
+                            val size = if (car) 24f else 18f
+                            findViewById<TextView>(android.R.id.message)?.textSize = size
+                            for (id in listOf(AlertDialog.BUTTON_POSITIVE, AlertDialog.BUTTON_NEUTRAL, AlertDialog.BUTTON_NEGATIVE)) {
+                                getButton(id).apply {
+                                    textSize = size
+                                    minHeight = ((if (car) 76 else 64) * resources.displayMetrics.density).toInt()
+                                }
+                            }
+                        }
+                }.onFailure { screen.showState(report, false, BluetoothAppExport.failureMessage(it)) }
+            }
+        }
+    }
+
+    @Deprecated("Android Activity result API retained for this small native API25+ helper")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != SAVE_CODE || resultCode != RESULT_OK) return
+        val name = pendingExportName ?: return
+        val uri = data?.data ?: return
+        if (busy) return
+        busy = true
+        screen.showState(report, true, R.string.carlink_lab_export_saving)
+        worker.execute {
+            val result = runCatching { BluetoothAppExport.save(applicationContext, name, uri) }
+            deliver {
+                busy = false
+                screen.showState(report, false, if (result.isSuccess) R.string.carlink_lab_export_saved
+                    else R.string.carlink_lab_export_save_failed)
+            }
+        }
+    }
+
+    private fun share(uri: Uri, mime: String, title: Int) {
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = mime
+            putExtra(Intent.EXTRA_STREAM, uri)
+            clipData = ClipData.newRawUri(null, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        try {
+            startActivity(Intent.createChooser(send, getString(title)))
+        } catch (_: Exception) {
+            screen.showState(report, false, R.string.carlink_lab_share_failed)
         }
     }
 
@@ -217,6 +294,7 @@ class MainActivity : Activity() {
         outState.putString(REPORT, report)
         outState.putBoolean(SETTINGS_RETURN, refreshAfterSettings)
         outState.putString(SETTINGS_REQUEST, lastSettingsRequest)
+        outState.putString(EXPORT_NAME, pendingExportName)
         super.onSaveInstanceState(outState)
     }
 
@@ -231,5 +309,7 @@ class MainActivity : Activity() {
         const val REPORT = "compatibility_report"
         const val SETTINGS_RETURN = "refresh_after_settings"
         const val SETTINGS_REQUEST = "last_settings_request"
+        const val EXPORT_NAME = "bluetooth_export_name"
+        const val SAVE_CODE = 2
     }
 }
