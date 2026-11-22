@@ -25,7 +25,7 @@ import java.time.Duration
 
 /** Real watcher/UsbManager/SessionManager integration, without a device or a vendor session. */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [29], application = Application::class)
+@Config(sdk = [27, 29], application = Application::class)
 @LooperMode(LooperMode.Mode.PAUSED)
 class UsbStartupRecoveryTest {
     private val app: Application get() = RuntimeEnvironment.getApplication()
@@ -36,6 +36,10 @@ class UsbStartupRecoveryTest {
     private var stops = 0
     private var engineRunning = false
     private var events: ((AdapterEvent) -> Unit)? = null
+    private var connectOnStart = true
+    private var holdStops = false
+    private val stopCompletions = mutableListOf<() -> Unit>()
+    private val startedNodes = mutableListOf<String?>()
 
     @Before fun setup() {
         ReflectionHelpers.setStaticField(UsbWatcher::class.java, "instance", null)
@@ -45,19 +49,21 @@ class UsbStartupRecoveryTest {
                 override fun start(plan: SessionPlan, listener: (AdapterEvent) -> Unit) {
                     check(!engineRunning)
                     starts++
+                    startedNodes += plan.usbAttach?.let { UsbRouterActivity.usbDevice(it)?.deviceName }
                     engineRunning = true
                     events = listener
-                    listener(AdapterEvent.Connected)
+                    if (connectOnStart) listener(AdapterEvent.Connected)
                 }
                 override fun stop(onStopped: () -> Unit) {
                     stops++
-                    engineRunning = false
-                    onStopped()
+                    val finish = { engineRunning = false; onStopped() }
+                    if (holdStops) stopCompletions += finish else finish()
                 }
             },
             environment = object : SessionManager.Environment {
                 override fun preflight(request: SessionRequest) = emptyList<Problem>()
                 override fun usbPhonePresent() = usb.deviceList.values.any { it.vendorId == 0x05AC }
+                override fun currentUsbAttach(previous: Intent?) = UsbWatcher.get(app).currentIphoneAttach(previous)
                 override fun returnHome() = Unit
                 override fun log(message: String) = Unit
             },
@@ -70,6 +76,8 @@ class UsbStartupRecoveryTest {
     @After fun cleanup() {
         watcher.stop()
         session.stop()
+        stopCompletions.toList().forEach { it() }
+        stopCompletions.clear()
         idle()
         ReflectionHelpers.setStaticField(Connection::class.java, "instance", null)
         ReflectionHelpers.setStaticField(UsbWatcher::class.java, "instance", null)
@@ -215,5 +223,261 @@ class UsbStartupRecoveryTest {
         assertEquals(0, starts)
         listed(phone()); advance(1_000)
         assertEquals(1, starts)
+    }
+
+    private fun detach(device: UsbDevice) {
+        shadowOf(usb).removeUsbDevice(device)
+        app.sendBroadcast(Intent(UsbManager.ACTION_USB_DEVICE_DETACHED)
+            .putExtra(UsbManager.EXTRA_DEVICE, device))
+        idle()
+    }
+
+    private fun attach(device: UsbDevice) {
+        listed(device)
+        app.sendBroadcast(Intent(UsbManager.ACTION_USB_DEVICE_ATTACHED)
+            .putExtra(UsbManager.EXTRA_DEVICE, device))
+        idle()
+    }
+
+    @Test fun replugAfterAutomaticEndAndConfirmedDepartureDoesNotStaySuppressed() {
+        val original = phone()
+        listed(original); watcher.start(); idle()
+        events!!.invoke(AdapterEvent.Ended(false)); idle() // Transport ends before USB removal is delivered.
+        detach(original); advance(1_500)
+        attach(phone(node = "/dev/bus/usb/001/009"))
+        assertEquals(2, starts)
+    }
+
+    @Test fun aQuickAttachDeclinedDuringAutomaticStopIsRetriedWithoutAnotherBroadcast() {
+        val original = phone()
+        listed(original); watcher.start(); idle()
+        events!!.invoke(AdapterEvent.Ended(false)); idle()
+        detach(original); advance(100)
+        attach(phone(node = "/dev/bus/usb/001/009"))
+        advance(11_000)
+        assertEquals(2, starts)
+    }
+
+    @Test fun aFailedSessionAlsoRearmsAfterARealDeparture() {
+        val original = phone()
+        listed(original); watcher.start(); idle()
+        events!!.invoke(AdapterEvent.Failed(FailureReason.USB, "link closed")); idle()
+        detach(original); advance(1_500)
+        attach(phone(node = "/dev/bus/usb/001/009"))
+        assertEquals(2, starts)
+    }
+
+    @Test fun detachStartsABoundedSearchForAMissingReattachBroadcast() {
+        val original = phone()
+        listed(original); watcher.start(); idle()
+        detach(original); advance(2_000)
+        listed(phone(node = "/dev/bus/usb/001/009"))
+        advance(1_100)
+        assertEquals(2, starts)
+    }
+
+    @Test fun rapidConnectedReplugRestartsOnceAndWaitsForTheOldTeardown() {
+        val original = phone()
+        listed(original); watcher.start(); idle()
+        holdStops = true
+        detach(original); advance(100)
+        attach(phone(node = "/dev/bus/usb/001/009"))
+        advance(1_200)
+        assertEquals(1, starts)
+        assertEquals(1, stops)
+        holdStops = false
+        stopCompletions.toList().forEach { it() }; stopCompletions.clear(); idle()
+        assertEquals(2, starts)
+        assertEquals("/dev/bus/usb/001/009", startedNodes.last())
+    }
+
+    @Test fun engineOwnedRetryWinsTheRapidReplugGrace() {
+        val original = phone()
+        listed(original); watcher.start(); idle()
+        detach(original); advance(100)
+        attach(phone(node = "/dev/bus/usb/001/009"))
+        events!!.invoke(AdapterEvent.Retrying(1, FailureReason.USB)); idle()
+        advance(1_500)
+        assertEquals(1, starts)
+        assertEquals(0, stops)
+    }
+
+    @Test fun lateControlEndKeepsTheAlreadyReturnedPhoneForOneRecovery() {
+        val original = phone()
+        listed(original); watcher.start(); idle()
+        detach(original); advance(100)
+        attach(phone(node = "/dev/bus/usb/001/009"))
+        events!!.invoke(AdapterEvent.Ended(false)); idle()
+        advance(10_500)
+        assertEquals(2, starts)
+        assertEquals("/dev/bus/usb/001/009", startedNodes.last())
+    }
+
+    @Test fun aDeferredRecoveryRefreshesItsIntentAfterAnotherUsbEnumeration() {
+        val original = phone()
+        listed(original); watcher.start(); idle()
+        events!!.invoke(AdapterEvent.Ended(false)); idle()
+        detach(original); advance(100)
+        val returned = phone(node = "/dev/bus/usb/001/009")
+        attach(returned)
+        shadowOf(usb).removeUsbDevice(returned)
+        listed(phone(node = "/dev/bus/usb/001/010")) // No further broadcast.
+        advance(10_500)
+        assertEquals(2, starts)
+        assertEquals("/dev/bus/usb/001/010", startedNodes.last())
+    }
+
+    @Test fun repeatedFailureReenumerationCannotCreateAnAutomaticRecoveryLoop() {
+        val original = phone()
+        listed(original); watcher.start(); idle()
+        events!!.invoke(AdapterEvent.Ended(false)); idle()
+        detach(original); advance(100)
+        val returned = phone(node = "/dev/bus/usb/001/009")
+        attach(returned)
+        connectOnStart = false
+        advance(10_500)
+        assertEquals(2, starts)
+        events!!.invoke(AdapterEvent.Failed(FailureReason.USB, "still unavailable")); idle()
+        detach(returned); advance(100)
+        attach(phone(node = "/dev/bus/usb/001/010"))
+        advance(15_000)
+        assertEquals(2, starts)
+    }
+
+    @Test fun manualDisconnectCancelsAnAlreadyPendingAutomaticReplug() {
+        val original = phone()
+        listed(original); watcher.start(); idle()
+        events!!.invoke(AdapterEvent.Ended(false)); idle()
+        detach(original); advance(100)
+        attach(phone(node = "/dev/bus/usb/001/009"))
+        session.disconnect(); idle(); advance(15_000)
+        watcher.onHomeShown(); watcher.onWake(); idle()
+        assertEquals(1, starts)
+        assertEquals(SessionState.Idle, session.state.value)
+    }
+
+    @Test fun aNewExplicitConnectMakesTheOldDeferredCallbackHarmless() {
+        val original = phone()
+        listed(original); watcher.start(); idle()
+        events!!.invoke(AdapterEvent.Ended(false)); idle()
+        detach(original); advance(100)
+        val returned = phone(node = "/dev/bus/usb/001/009")
+        attach(returned)
+        session.connectUsb(attach = Intent(UsbManager.ACTION_USB_DEVICE_ATTACHED).putExtra(UsbManager.EXTRA_DEVICE, returned)); idle()
+        advance(15_000)
+        assertEquals(2, starts)
+    }
+
+    @Test fun connectedSnapshotUsesTheNcmNodeRatherThanTheBootstrapIntent() {
+        val original = phone()
+        connectOnStart = false
+        listed(original); watcher.start(); idle()
+        shadowOf(usb).removeUsbDevice(original)
+        val ncm = phone(node = "/dev/bus/usb/001/004")
+        listed(ncm)
+        events!!.invoke(AdapterEvent.Connected); idle()
+        connectOnStart = true
+        detach(ncm); advance(100)
+        attach(phone(node = "/dev/bus/usb/001/009"))
+        advance(1_200)
+        assertEquals(2, starts)
+    }
+
+    @Test fun staleOldNodeDoesNotEndTheMissingAttachSearch() {
+        val original = phone()
+        listed(original); watcher.start(); idle()
+        app.sendBroadcast(Intent(UsbManager.ACTION_USB_DEVICE_DETACHED).putExtra(UsbManager.EXTRA_DEVICE, original))
+        idle(); advance(600) // Emulate an OEM list that still contains the just-removed node.
+        shadowOf(usb).removeUsbDevice(original)
+        listed(phone(node = "/dev/bus/usb/001/009"))
+        advance(1_000)
+        assertEquals(2, starts)
+    }
+
+    @Test fun aNonPhoneDetachDoesNotStartPhoneRecoveryOrStopProjection() {
+        listed(phone()); watcher.start(); idle()
+        val drive = phone(node = "/dev/bus/usb/001/020", vendor = 0x0781, name = "USB drive")
+        listed(drive); detach(drive); advance(5_000)
+        assertEquals(1, starts)
+        assertEquals(0, stops)
+    }
+
+    @Test fun engineRetryThenTerminalEndRetainsTheReturnedPhoneAfterTheGrace() {
+        val original = phone()
+        listed(original); watcher.start(); idle()
+        detach(original); advance(100)
+        attach(phone(node = "/dev/bus/usb/001/009"))
+        events!!.invoke(AdapterEvent.Retrying(1, FailureReason.USB)); idle()
+        advance(2_000)
+        assertEquals(1, starts)
+        events!!.invoke(AdapterEvent.Ended(false)); idle()
+        advance(10_500)
+        assertEquals(2, starts)
+    }
+
+    @Test fun successfulEngineRecoveryClearsPriorReturnedPhoneEvidence() {
+        val original = phone()
+        listed(original); watcher.start(); idle()
+        detach(original); advance(100)
+        attach(phone(node = "/dev/bus/usb/001/009"))
+        events!!.invoke(AdapterEvent.Retrying(1, FailureReason.USB)); idle()
+        advance(1_500)
+        events!!.invoke(AdapterEvent.Connected); idle()
+        events!!.invoke(AdapterEvent.Ended(false)); idle()
+        advance(15_000)
+        assertEquals(1, starts) // No fresh detach/attach after that successful connection.
+    }
+
+    @Test fun theEngineKeepsItsInternalStartupUsbReenumeration() {
+        val original = phone()
+        connectOnStart = false
+        listed(original); watcher.start(); idle()
+        detach(original); advance(100)
+        attach(phone(node = "/dev/bus/usb/001/004"))
+        advance(4_000)
+        assertEquals(1, starts)
+        assertEquals(0, stops)
+    }
+
+    @Test fun aChangedNodeWithoutADetachRecordDoesNotResetAHealthySession() {
+        val original = phone()
+        listed(original); watcher.start(); idle()
+        shadowOf(usb).removeUsbDevice(original)
+        listed(phone(node = "/dev/bus/usb/001/009"))
+        watcher.onHomeShown(); idle(); advance(2_000)
+        assertEquals(1, starts)
+        assertEquals(0, stops)
+    }
+
+    @Test fun detachEnumerationSearchAlsoStopsAfterThirtySeconds() {
+        val original = phone()
+        listed(original); watcher.start(); idle()
+        detach(original); advance(31_000)
+        listed(phone(node = "/dev/bus/usb/001/009"))
+        advance(60_000)
+        assertEquals(1, starts)
+    }
+
+    @Test fun engineRetryRetainsDepartureWhenReplacementArrivesAfterTheGrace() {
+        val original = phone()
+        listed(original); watcher.start(); idle()
+        app.sendBroadcast(Intent(UsbManager.ACTION_USB_DEVICE_DETACHED).putExtra(UsbManager.EXTRA_DEVICE, original))
+        idle()
+        events!!.invoke(AdapterEvent.Retrying(1, FailureReason.USB)); idle()
+        advance(1_500) // The OEM still reports the stale old entry throughout the grace.
+        shadowOf(usb).removeUsbDevice(original)
+        attach(phone(node = "/dev/bus/usb/001/009"))
+        events!!.invoke(AdapterEvent.Ended(false)); idle()
+        advance(10_500)
+        assertEquals(2, starts)
+    }
+
+    @Test fun aReusedUsbNodeIsFoundAfterItsAbsenceWasObservedWithoutAnAttachBroadcast() {
+        val original = phone()
+        listed(original); watcher.start(); idle()
+        detach(original); advance(2_000)
+        listed(phone()) // Same path, but a genuinely new enumeration after observed absence.
+        advance(1_100)
+        assertEquals(2, starts)
     }
 }

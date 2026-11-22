@@ -1,4 +1,4 @@
-> **F-150 fork, version 1.3.0:** the current product has `:app` (clock/status, settings, music EQ, call audio,
+> **F-150 fork, version 1.3.1:** the current product has `:app` (clock/status, settings, music EQ, call audio,
 > About and log export), `:carlink-core` (one USB CarPlay session, USB routing/wake/reset,
 > display policy, per-renderer music PCM equalization and timing history),
 > and DiPlay's `:carplay-common` / `:carplay-shared` engine. Android Auto and the generic wireless,
@@ -21,6 +21,21 @@ existing re-enumeration guard. `CarPlayForegroundGate` is installed before disco
 resumed Activities with weak references and gives each deferred launch a cancelable generation.
 An already-resumed Activity can launch projection without waiting for another resume callback.
 Fully background Android 10+ startup remains deferred until an allowed foreground entry.
+
+Replug recovery retains a temporarily declined USB attach through the automatic
+10-second terminal-event guard and admits one fresh-device retry. Watcher/router
+claims are released when admission returns false. A relevant detach starts bounded
+30-second enumeration through normal admission rules; stale removed nodes are
+ignored until replacement/observed absence, including later address reuse. The
+session confirms absence even in Idle/Failed and clears automatic suppression.
+Its Connected-node snapshot comes from current enumeration, not the pre-NCM intent.
+A recorded detach and replacement can restart an unchanged Connected attempt after
+its existing 1.2-second grace, always behind completed teardown. Engine Retry/Progress
+wins that grace, while departure/returned evidence remains available for a later
+terminal event for up to30 seconds. First frame, explicit stop/new attempt and
+callback tokens discard stale evidence/work. Manual Disconnect forbids scan recovery;
+a guarded unsuccessful retry does not reset its own recovery allowance.
+
 Projection retains the separate `.carplay` task but is excluded from Recents by the app manifest.
 Home supplies the visible app card. Keeping separate affinities prevents Home's `singleTask`
 settings launch from clearing/destroying the projection activity above it in a shared task.

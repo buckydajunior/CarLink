@@ -13,6 +13,7 @@ class DeviceEnvironment(context: Context) : SessionManager.Environment {
     private val app = context.applicationContext
     override fun preflight(request: SessionRequest): List<Problem> = CarPlayPreflight.check(app)
     override fun usbPhonePresent(): Boolean = UsbWatcher.get(app).hasIphone()
+    override fun currentUsbAttach(previous: Intent?): Intent? = UsbWatcher.get(app).currentIphoneAttach(previous)
     override fun usbSerial(attach: Intent?): String? = runCatching {
         val device = if (Build.VERSION.SDK_INT >= 33) attach?.getParcelableExtra(UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
         else @Suppress("DEPRECATION") attach?.getParcelableExtra<UsbDevice>(UsbManager.EXTRA_DEVICE)

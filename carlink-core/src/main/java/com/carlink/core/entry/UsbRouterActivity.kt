@@ -48,7 +48,7 @@ class UsbRouterActivity : Activity() {
             return
         }
         // The attach intent carries the UsbDevice: DiPlay reads it for a wired iPhone, and the engine can find that exact device.
-        session.onUsbPhone(kind, "iPhone", intent)
+        if (!session.onUsbPhone(kind, "iPhone", intent)) UsbWatcher.get(this).release(device)
     }
 
     companion object {

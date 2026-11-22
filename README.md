@@ -81,6 +81,33 @@ Home can retry an inactive, already-listed phone without a physical replug. Work
 manual Disconnect remain protected. A lifecycle gate uses an actual resumed app Activity rather
 than a potentially late process-importance snapshot; canceled or superseded launches are discarded.
 
+Version 1.3.1 fixes a reproduced host-side replug recovery gap. An automatic terminal
+transport event can arrive while Android still lists the old USB device. The old
+10-second anti-loop guard then rejected a returned phone while the watcher/router
+permanently marked its new node handled. The app could remain on the waiting clock
+until a fresh foreground retry or reboot. A guarded attach is now retained and
+retried once with a freshly enumerated device after the guard, and rejected fresh
+claims are released. A confirmed cable departure clears automatic suppression.
+
+Relevant iPhone detach events also start a bounded 30-second enumeration search
+for a missed reattach broadcast. The stale removed node does not end that search;
+a node address can be reused after observed absence. A very quick replacement node
+from an established session can restart after the existing 1.2-second grace and
+completed teardown. Internal startup re-enumeration and an engine-owned retry keep
+control; returned-phone evidence survives a retry that terminates later, for at most
+30 seconds, and is cleared by successful connection or explicit stop/new attempt.
+Manual Disconnect still suppresses scans, delayed work is token checked, and a
+failed guarded recovery does not renew its own retry allowance. Success, explicit
+Connect/Retry or a confirmed departure rearms that allowance.
+There is no permanent USB poll, altered authentication, forced reboot or new startup
+wait. Logs identify guard retention, expiry, departure, replacement and scan outcome.
+
+The user reported fast first connection, followed by a failed replug after briefly
+unplugging for Apple Pay; the app showed its clock with waiting-for-connection status
+until the Linkswell was rebooted. Desktop regressions reproduce plausible lost-replug
+paths; they do not establish the precise on-device event order. The 1.3.1 physical
+unplug/replug behavior still needs testing on this Linkswell.
+
 On Android 10+, a fully background app still needs an allowed foreground launch. If F-150 CarPlay
 does not open with the tablet, use the Linkswell launcher's startup-app option if it provides one.
 The app does not bypass [Android's background-start restrictions](https://developer.android.com/guide/components/activities/secure-bal)
@@ -158,3 +185,26 @@ component notices. Original engine documentation remains under `vendor/diplay/do
 `docs`/`design` documents describe upstream history and may mention removed modules.
 
 CarPlay is Apple's trademark. This project is independent of Apple, Ford and Linkswell.
+
+## Version 1.3.1 validation — 2026-11-22
+
+- Four new lost-replug regressions failed against the previous implementation.
+  With the fix, all four suites passed: 4,006 passed, two existing skips, no failures
+  (app36/core214/shared1985/common1773 total4,008). USB watcher/session/router targets
+  include 95 executions; the full enumeration integration cases run on API27 and29.
+- Coverage includes early/late transport ends, failed and Connected sessions,
+  incomplete teardown, missed attach broadcasts, stale/reused USB nodes, NCM versus
+  bootstrap identity, engine-owned Retry/Progress, retained late return evidence,
+  successful-recovery invalidation, manual pause, stale callbacks and bounded retries/scans.
+- Resource collisions:14 reviewed, zero unreviewed. Debug and optimized R8 test
+  release builds passed; no UI geometry/resources changed and no new renders needed.
+- Verified signed1.3.1/10301 package, alignment, same V2 test certificate, unchanged
+  permissions/native entry inventory/licenses, and the new recovery paths in DEX.
+  The exact same two checksum-verified public experimental upstream v1.0.16 runtime
+  identity files as1.3.0 are packaged; source/signing material remains outside Git.
+- Test APK:4,329,835 bytes; SHA-256
+  `494a128b6a924d519a4fe7b6db24266da5cd36fe695da529e4c1f2563cc992c8`.
+- Actual Linkswell unplug/replug, calls, ignition recovery and connection timing
+  remain hardware checks. The reported clock/waiting symptom matches the reproduced
+  gap, but no device log establishes the exact event order for that occurrence.
+  No release/tag is published.

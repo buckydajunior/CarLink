@@ -37,7 +37,7 @@ data class Notice(val kind: Kind, val stage: ProgressStage?, val message: String
     enum class Kind { PHONE_NOT_ANSWERING, SLOW, RECOVERING }
 }
 
-/** One wired session: never reopen before teardown completes, never restart on USB re-enumeration. */
+/** One wired session: ordered teardown, with internal USB configuration changes owned by the engine. */
 class SessionManager(
     private val adapter: EngineAdapter,
     private val environment: Environment,
@@ -51,6 +51,8 @@ class SessionManager(
         fun preflight(request: SessionRequest): List<Problem>
         fun usbSerial(attach: Intent?): String? = null
         fun usbPhonePresent(): Boolean
+        /** Fresh enumeration for a deferred replug; the original intent may name a retired node. */
+        fun currentUsbAttach(previous: Intent?): Intent? = previous
         fun returnHome()
         fun log(message: String)
     }
@@ -69,6 +71,13 @@ class SessionManager(
     private var driverStoppedAt = -REENUMERATION_WINDOW_MILLIS
     private var driverStoppedWithPhone = false
     private var automaticStartPaused = false
+    private var replugRetryUsed = false
+    private var connectedUsbNode: String? = null
+    private data class UsbDeparture(val token: Int, val attempt: Attempt?, val node: String?,
+        val wasConnected: Boolean, val graceAt: Long, val expiresAt: Long, var returned: SessionRequest? = null)
+    private var usbDeparture: UsbDeparture? = null
+    private data class PendingUsbAttach(val request: SessionRequest, val token: Int)
+    private var pendingUsbAttach: PendingUsbAttach? = null
     private class Attempt(val request: SessionRequest, val plan: SessionPlan, now: Long) {
         var startedAt = now
         var stage = ProgressStage.WAITING_FOR_PHONE
@@ -80,12 +89,62 @@ class SessionManager(
         var connectedOnce = false
     }
     private val watchdog = Runnable { onWatchdog() }
-    private val usbGoneCheck = Runnable {
-        if (_state.value !is SessionState.Active) return@Runnable
-        if (environment.usbPhonePresent()) return@Runnable
-        note("USB iPhone unplugged; ending the session")
-        stop()
-        environment.returnHome()
+    private val deferredUsbAttach = Runnable {
+        val pending = pendingUsbAttach ?: return@Runnable
+        pendingUsbAttach = null
+        if (pending.token != token || automaticStartPaused || replugRetryUsed ||
+            _state.value is SessionState.Active || !environment.usbPhonePresent()) return@Runnable
+        val attach = environment.currentUsbAttach(pending.request.usbAttach) ?: return@Runnable
+        replugRetryUsed = true
+        note("USB replug guard expired; retrying the currently listed iPhone once")
+        start(pending.request.copy(usbAttach = attach))
+    }
+    private val usbGoneCheck: Runnable = Runnable {
+        val departure = usbDeparture ?: return@Runnable
+        if (departure.token != token) return@Runnable
+        if (!environment.usbPhonePresent()) {
+            usbDeparture = null
+            // A terminal transport callback can precede Android's detach broadcast. Its
+            // anti-loop guard must not survive a subsequently confirmed cable departure.
+            if (!automaticStartPaused) driverStoppedWithPhone = false
+            replugRetryUsed = false
+            clearPendingUsbAttach()
+            if (_state.value is SessionState.Active || _state.value is SessionState.Blocked ||
+                _state.value is SessionState.Failed) {
+                note("USB iPhone departure confirmed; ending the session")
+                stop()
+                environment.returnHome()
+            }
+            return@Runnable
+        }
+        val current = _state.value as? SessionState.Active
+        // An established CONTROL phase cannot consume a replacement USB node. Retain the
+        // established-session grace, but let any engine-owned retry/progress win it.
+        if (departure.wasConnected && departure.attempt === attempt &&
+            current?.phase == SessionState.Phase.Connected && departure.node != null &&
+            departure.node == connectedUsbNode) {
+            val attach = environment.currentUsbAttach(departure.returned?.usbAttach ?: current.request.usbAttach)
+            if (usbNode(attach)?.let { it != departure.node } == true) {
+                usbDeparture = null
+                note("USB iPhone returned on a replacement node; restarting after teardown")
+                start((departure.returned ?: current.request).copy(usbAttach = attach))
+                return@Runnable
+            }
+            // Hold only the recorded departure evidence while the bounded OEM enumeration
+            // search runs. A later replacement attach can re-arm this already-mature check.
+            if (clock() < departure.expiresAt) {
+                main.postDelayed(usbGoneCheck, departure.expiresAt - clock())
+                return@Runnable
+            }
+        }
+        if (departure.wasConnected && departure.attempt === attempt && current != null &&
+            clock() < departure.expiresAt) {
+            // Engine-owned recovery wins the grace, but may still terminate later. Keep
+            // its already-returned phone available for that terminal callback only.
+            main.postDelayed(usbGoneCheck, departure.expiresAt - clock())
+            return@Runnable
+        }
+        usbDeparture = null
     }
     init {
         if (adapter.hasSession()) {
@@ -96,58 +155,74 @@ class SessionManager(
             } }
         }
     }
-    fun onUsbPhone(kind: PhoneKind, phoneName: String?, attach: Intent?) {
-        if (kind != PhoneKind.IPHONE) return
+    /** False means the watcher/router must release its fresh handled claim. */
+    fun onUsbPhone(kind: PhoneKind, phoneName: String?, attach: Intent?): Boolean {
+        if (kind != PhoneKind.IPHONE) return false
+        val request = SessionRequest(phoneName, attach)
+        val departure = usbDeparture
+        if (departure != null && departure.token == token && departure.node != null &&
+            usbNode(attach)?.let { it != departure.node } == true) {
+            departure.returned = request
+            main.removeCallbacks(usbGoneCheck)
+            main.postDelayed(usbGoneCheck, (departure.graceAt - clock()).coerceAtLeast(0))
+        }
         val current = _state.value
         if (current is SessionState.Active) {
             val old = environment.usbSerial(current.request.usbAttach)
             val new = environment.usbSerial(attach)
             if (old != null && new != null && old != new) {
                 note("another iPhone replaced the cable; switching after teardown")
-                start(SessionRequest(phoneName, attach))
+                start(request)
             } else {
-                main.removeCallbacks(usbGoneCheck)
+                // Keep a recorded detach/replug check alive. Canceling it here stranded a
+                // Connected controller that cannot accept a new USB device itself.
+                if (departure == null) main.removeCallbacks(usbGoneCheck)
                 note("USB re-attach during CarPlay; left to the engine")
             }
-            return
+            return true
         }
         if (driverStoppedWithPhone && clock() - driverStoppedAt < REENUMERATION_WINDOW_MILLIS) {
-            note("USB re-attach after disconnect/failure; not restarting")
-            return
+            deferUsbAttach(request)
+            note("USB re-attach during stop guard; admission deferred or paused")
+            return false
         }
-        start(SessionRequest(phoneName, attach))
+        start(request)
+        return true
     }
     fun connectUsb(phoneName: String? = null, attach: Intent? = null) {
         if (_state.value is SessionState.Active) return
+        replugRetryUsed = false
         start(SessionRequest(phoneName, attach))
     }
     /** Wake/foreground scans can retry the same node without inventing a fresh USB attachment. */
-    fun onUsbReady(kind: PhoneKind, phoneName: String?, attach: Intent?): Boolean {
+    fun onUsbReady(kind: PhoneKind, phoneName: String?, attach: Intent?, retryFailed: Boolean = true): Boolean {
         if (kind != PhoneKind.IPHONE) return false
         if (_state.value is SessionState.Active) {
-            onUsbPhone(kind, phoneName, attach)
-            return true
+            return onUsbPhone(kind, phoneName, attach)
         }
         if (automaticStartPaused) {
             note("USB ready rescan; keeping the driver's disconnect")
             return false
         }
+        // Detach settling is automatic presence recovery, not a foreground/wake retry.
+        if (!retryFailed) return onUsbPhone(kind, phoneName, attach)
         note("USB ready rescan; retrying the listed iPhone")
         start(SessionRequest(phoneName, attach))
         return true
     }
     /** A cold USB launch needs a screen; internal re-enumeration must leave an existing host visible. */
     fun needsHostUi(): Boolean = _state.value is SessionState.Blocked || _state.value is SessionState.Failed || !adapter.hasSession()
-    fun onUsbDetached() {
+    fun onUsbDetached(node: String? = null) {
         val shown = _state.value
-        if (shown is SessionState.Blocked || shown is SessionState.Failed) {
-            main.postDelayed({ if (_state.value === shown && !environment.usbPhonePresent()) stop() }, USB_GONE_GRACE_MILLIS)
-            return
-        }
-        val active = shown as? SessionState.Active ?: return
+        val active = shown as? SessionState.Active
+        if (active?.phase == SessionState.Phase.Connected && node != null &&
+            connectedUsbNode != null && node != connectedUsbNode) return
+        val grace = if (active?.phase == SessionState.Phase.Connected || everConnected)
+            USB_GONE_CONNECTED_GRACE_MILLIS else USB_GONE_GRACE_MILLIS
+        usbDeparture = UsbDeparture(token, attempt, node,
+            active?.phase == SessionState.Phase.Connected, clock() + grace, clock() + USB_REPLUG_SEARCH_MILLIS)
         main.removeCallbacks(usbGoneCheck)
-        main.postDelayed(usbGoneCheck, if (active.phase == SessionState.Phase.Connected || everConnected)
-            USB_GONE_CONNECTED_GRACE_MILLIS else USB_GONE_GRACE_MILLIS)
+        main.postDelayed(usbGoneCheck, grace)
     }
     fun retry() {
         val request = when (val shown = _state.value) {
@@ -156,6 +231,7 @@ class SessionManager(
             is SessionState.Active -> shown.request
             SessionState.Idle -> return
         }
+        replugRetryUsed = false
         start(request)
     }
     fun onSettingsChanged() { if (_state.value is SessionState.Blocked) retry() }
@@ -170,6 +246,9 @@ class SessionManager(
         token++
         endAttempt()
         main.removeCallbacks(usbGoneCheck)
+        usbDeparture = null
+        connectedUsbNode = null
+        clearPendingUsbAttach()
         _state.value = SessionState.Idle
         if (running) { running = false; stopEngine() }
         drainAfterStop()
@@ -177,6 +256,19 @@ class SessionManager(
     private fun markDriverStop() {
         driverStoppedWithPhone = _state.value is SessionState.Active && environment.usbPhonePresent()
         driverStoppedAt = clock()
+    }
+    private fun clearPendingUsbAttach() {
+        pendingUsbAttach = null
+        main.removeCallbacks(deferredUsbAttach)
+    }
+    private fun deferUsbAttach(request: SessionRequest) {
+        if (automaticStartPaused) { note("USB replug kept paused by the driver's Disconnect"); return }
+        if (replugRetryUsed) { note("USB replug recovery already used; waiting for a fresh departure or Connect"); return }
+        pendingUsbAttach = PendingUsbAttach(request, token)
+        main.removeCallbacks(deferredUsbAttach)
+        note("USB replug retained until the automatic stop guard expires")
+        main.postDelayed(deferredUsbAttach,
+            (driverStoppedAt + REENUMERATION_WINDOW_MILLIS - clock()).coerceAtLeast(0) + 1)
     }
     private fun start(request: SessionRequest) {
         automaticStartPaused = false
@@ -199,6 +291,7 @@ class SessionManager(
         _state.value = SessionState.Active(request, number, phase, notice)
         running = true
         main.removeCallbacks(usbGoneCheck)
+        usbDeparture = null
         whenStopped {
             if (sessionToken != token) return@whenStopped
             worker.execute {
@@ -240,6 +333,8 @@ class SessionManager(
             }
             AdapterEvent.Connected -> {
                 main.removeCallbacks(watchdog)
+                main.removeCallbacks(usbGoneCheck)
+                usbDeparture = null
                 val took = clock() - a.startedAt
                 if (!a.connectedOnce) {
                     a.connectedOnce = true
@@ -247,6 +342,8 @@ class SessionManager(
                     profiles.recordSuccess(a.request, took)
                 }
                 everConnected = true
+                replugRetryUsed = false
+                connectedUsbNode = usbNode(environment.currentUsbAttach(a.request.usbAttach))
                 note("CARPLAY connected on USB in $took ms")
                 _state.value = current.copy(phase = SessionState.Phase.Connected, notice = null)
             }
@@ -259,9 +356,11 @@ class SessionManager(
             }
             is AdapterEvent.Restart -> replaceAttempt(a, SessionState.Phase.Starting)
             is AdapterEvent.Ended -> {
+                val returned = usbDeparture?.returned
                 if (event.byUser) automaticStartPaused = true
                 if (!event.byUser && !environment.usbPhonePresent()) environment.returnHome()
                 markDriverStop(); stop()
+                if (returned != null) deferUsbAttach(returned)
             }
             is AdapterEvent.Failed -> {
                 profiles.recordFailure(a.request, event.reason.name, a.stage, event.detail)
@@ -325,8 +424,12 @@ class SessionManager(
         begin(a.request, token, phase, notice, a.plan.attempt + 1)
     }
     private fun failSession(a: Attempt, reason: FailureReason, detail: String?) {
+        val returned = usbDeparture?.returned
         markDriverStop(); token++; endAttempt(); running = false; stopEngine()
+        main.removeCallbacks(usbGoneCheck); usbDeparture = null; connectedUsbNode = null
+        clearPendingUsbAttach()
         _state.value = SessionState.Failed(a.request, reason, detail, a.stage)
+        if (returned != null) deferUsbAttach(returned)
     }
     private fun endAttempt() { attempt = null; main.removeCallbacks(watchdog) }
     private fun stopEngine() {
@@ -344,6 +447,9 @@ class SessionManager(
         const val REENUMERATION_WINDOW_MILLIS = 10_000L
         const val NOT_ANSWERING_MILLIS = AdaptiveDeadlines.HINT_MILLIS
         const val MAX_QUICK_RETRIES = 2
+        private const val USB_REPLUG_SEARCH_MILLIS = 30_000L
+        private fun usbNode(attach: Intent?): String? =
+            attach?.let { com.carlink.core.entry.UsbRouterActivity.usbDevice(it) }?.deviceName
         private fun order(stage: ProgressStage): Int = when (stage) {
             ProgressStage.WAITING_FOR_PHONE, ProgressStage.PHONE_NOT_ANSWERING -> 0
             ProgressStage.HANDSHAKE -> 1

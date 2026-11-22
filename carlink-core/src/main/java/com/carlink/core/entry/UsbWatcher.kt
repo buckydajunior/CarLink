@@ -32,6 +32,8 @@ class UsbWatcher private constructor(context: Context) {
     private var settling = false
     private var nextScan = 0
     private var recoverHandled = false
+    private var detachScan = false
+    private var detachedNode: String? = null
     private var lastWakeAt = -WAKE_COALESCE_MILLIS
     private val settlingScan = Runnable {
         if (registered && settling && !scan()) scheduleNextScan()
@@ -46,7 +48,18 @@ class UsbWatcher private constructor(context: Context) {
                 }
                 UsbManager.ACTION_USB_DEVICE_DETACHED -> {
                     handled -= device.deviceName
-                    Connection.get(app).onUsbDetached()
+                    if (PhoneClassifier.classifyUsb(UsbRouterActivity.describe(device)) == PhoneKind.IPHONE) {
+                        Connection.get(app).onUsbDetached(device.deviceName)
+                        // Replug enumeration can miss its attach broadcast on this head unit.
+                        // Use a bounded search and the normal admission/driver-pause rules.
+                        finishSettling()
+                        detachScan = true
+                        detachedNode = device.deviceName
+                        settling = true
+                        nextScan = 0
+                        com.carlink.core.diagnostics.EventLog.add("USB", "waiting for iPhone replug enumeration (up to 30 s)")
+                        scheduleNextScan()
+                    }
                 }
             }
         }
@@ -97,9 +110,14 @@ class UsbWatcher private constructor(context: Context) {
     private fun scan(): Boolean {
         val present = listedDevices()
         handled.retainAll(present.map { it.deviceName }.toSet())
+        // A later enumeration may reuse the address after it really disappeared.
+        if (detachScan && present.none { it.deviceName == detachedNode }) detachedNode = null
         var phoneFound = false
         for (device in present) {
-            if (route(device, fromScan = true, recover = recoverHandled && !phoneFound)) phoneFound = true
+            // OEM enumeration can briefly retain the removed node. Its presence is not
+            // successful replug discovery and must not terminate this bounded search.
+            if (detachScan && device.deviceName == detachedNode) continue
+            if (route(device, fromScan = true, recover = (recoverHandled || detachScan) && !phoneFound)) phoneFound = true
         }
         if (phoneFound) finishSettling()
         return phoneFound
@@ -107,8 +125,10 @@ class UsbWatcher private constructor(context: Context) {
 
     private fun scheduleNextScan() {
         if (nextScan >= STARTUP_SCAN_DELAYS_MILLIS.size) {
+            val replug = detachScan
             finishSettling()
-            com.carlink.core.diagnostics.EventLog.add("USB", "startup USB scan ended; no iPhone listed")
+            com.carlink.core.diagnostics.EventLog.add("USB", if (replug)
+                "replug USB scan ended; no replacement iPhone listed" else "startup USB scan ended; no iPhone listed")
         } else main.postDelayed(settlingScan, STARTUP_SCAN_DELAYS_MILLIS[nextScan++])
     }
 
@@ -116,12 +136,23 @@ class UsbWatcher private constructor(context: Context) {
         main.removeCallbacks(settlingScan)
         settling = false
         recoverHandled = false
+        detachScan = false
+        detachedNode = null
     }
 
     /** Fresh USB-only presence check for Home and unplug handling; never reads phone names or radios. */
-    fun hasIphone(): Boolean = listedDevices().any { device ->
+    private fun iphoneDevices(): List<UsbDevice> = listedDevices().filter { device ->
         device.vendorId == PhoneClassifier.APPLE_VENDOR_ID &&
             PhoneClassifier.classifyUsb(UsbRouterActivity.describe(device)) == PhoneKind.IPHONE
+    }
+    fun hasIphone(): Boolean = iphoneDevices().isNotEmpty()
+
+    /** Refresh a retained intent after teardown/guard delays; never reopen a retired USB node. */
+    fun currentIphoneAttach(previous: Intent?): Intent? {
+        val present = iphoneDevices()
+        val previousNode = previous?.let { UsbRouterActivity.usbDevice(it)?.deviceName }
+        val device = present.firstOrNull { it.deviceName == previousNode } ?: present.firstOrNull() ?: return null
+        return Intent(UsbManager.ACTION_USB_DEVICE_ATTACHED).putExtra(UsbManager.EXTRA_DEVICE, device)
     }
 
     fun stop() {
@@ -137,6 +168,7 @@ class UsbWatcher private constructor(context: Context) {
      * scan (Home opening) must not start a second time for a phone that is still plugged in.
      */
     fun claim(device: UsbDevice): Boolean = handled.add(device.deviceName)
+    fun release(device: UsbDevice) { handled -= device.deviceName }
 
     private fun route(device: UsbDevice, fromScan: Boolean = false, recover: Boolean = false): Boolean {
         val fresh = claim(device)
@@ -154,11 +186,10 @@ class UsbWatcher private constructor(context: Context) {
         if (kind != PhoneKind.IPHONE) return false
         if (fresh || recover) {
             val attach = Intent(UsbManager.ACTION_USB_DEVICE_ATTACHED).putExtra(UsbManager.EXTRA_DEVICE, device)
-            if (fromScan) {
-                val accepted = Connection.get(app).onUsbReady(kind, "iPhone", attach)
-                // A paused scan must not consume a later real system attach for a new node.
-                if (fresh && !accepted) handled -= device.deviceName
-            } else Connection.get(app).onUsbPhone(kind, "iPhone", attach)
+            val accepted = if (fromScan) Connection.get(app).onUsbReady(kind, "iPhone", attach, retryFailed = !detachScan)
+                else Connection.get(app).onUsbPhone(kind, "iPhone", attach)
+            // A temporary guard/driver pause must not permanently consume a new node.
+            if (fresh && !accepted) release(device)
         }
         return true
     }

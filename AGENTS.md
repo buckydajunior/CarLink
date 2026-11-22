@@ -28,3 +28,9 @@ The product targets a 2018 Ford F-150 Lariat with an unspecified Linkswell model
 - Do not tag or publish a release unless the user requests it. Original maintainer devices,
   private paths and main-branch push instructions in upstream development notes are historical,
   not this user's environment or authorization.
+
+- Replug admission returns acceptance: release fresh watcher/router claims on rejection.
+  Preserve one token-checked deferred attach through the automatic terminal guard,
+  refresh its UsbDevice before start and never bypass completed teardown or consent.
+  Keep detach scans bounded, manual Disconnect respected, internal startup re-enumeration
+  owned by the engine, and stale/returned node evidence bounded and cleared on success.
