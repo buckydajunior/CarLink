@@ -98,6 +98,9 @@ object CarPlayHostIntegration {
     fun authenticationError(context: Context): Throwable? =
         runCatching { DiPlayBootstrap.ensure(context, AirPlayPersistence.loadMfiTarget(context)) }.exceptionOrNull()
 
+    /** CarLink: read the bounded, redacted saved Java crash without opening engine diagnostics. Call on a worker. */
+    fun lastCrashReport(context: Context): String = CrashRecord.report(context)
+
     // ---------------------------------------------------------------- CarLink: session lifecycle
 
     /**

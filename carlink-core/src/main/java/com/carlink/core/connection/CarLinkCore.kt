@@ -2,8 +2,6 @@ package com.carlink.core.connection
 
 import android.app.Application
 import android.content.Context
-import android.os.Handler
-import android.os.Looper
 import android.view.View
 import com.carlink.core.audio.EqualizerController
 import com.carlink.core.diagnostics.EventLog
@@ -51,9 +49,7 @@ object CarLinkCore {
             override fun onConfigurationChanged(configuration: android.content.res.Configuration) {}
             @Deprecated("Deprecated in Java") override fun onLowMemory() = DeviceCapabilities.trimCaches()
         })
-        Handler(Looper.getMainLooper()).postDelayed({
-            Thread({ runCatching { DeviceCapabilities.read(app) } }, "carlink-capabilities")
-                .apply { priority = Thread.MIN_PRIORITY }.start()
-        }, 2_500L)
+        // Probe codecs only when a USB session needs them, on its settings worker. Some
+        // head-unit media services are still starting when this process wakes without a phone.
     }
 }

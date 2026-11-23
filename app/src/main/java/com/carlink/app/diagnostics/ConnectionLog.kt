@@ -3,6 +3,7 @@ package com.carlink.app.diagnostics
 import android.content.Context
 import com.carlink.core.diagnostics.EventLog
 import com.carlink.core.diagnostics.LogMasking
+import com.shilapi.xcertplay.CarPlayHostIntegration
 import java.io.File
 import java.io.RandomAccessFile
 import java.text.SimpleDateFormat
@@ -146,7 +147,10 @@ object ConnectionLog {
         dir.listFiles()?.forEach { it.delete() }
         val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
         return File(dir, "carlink-connection-log-$stamp.txt").apply {
-            writeText(format(read(context), "$header\nConnection: USB CarPlay"))
+            writeText(format(read(context), "$header\nConnection: USB CarPlay") +
+                "\nSaved Java crash (may be from an earlier installed version)\n" +
+                CarPlayHostIntegration.lastCrashReport(context) +
+                "\nA missing Java record does not rule out a native crash or an unresponsive app.\n")
         }
     }
 

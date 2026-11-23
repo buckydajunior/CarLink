@@ -34,3 +34,9 @@ The product targets a 2018 Ford F-150 Lariat with an unspecified Linkswell model
   refresh its UsbDevice before start and never bypass completed teardown or consent.
   Keep detach scans bounded, manual Disconnect respected, internal startup re-enumeration
   owned by the engine, and stale/returned node evidence bounded and cleared on success.
+
+- Startup must not eagerly probe vendor codecs with no phone. Keep memory-cache trim
+  nonblocking and generation-safe against an in-flight worker probe. The app uses
+  credential-protected preferences, so USB entry points must not claim Direct Boot.
+  Include the existing bounded/redacted saved Java crash in explicit log exports;
+  preserve Android's original uncaught-exception handling and old crash evidence.

@@ -35,5 +35,8 @@ class CarLinkApplication : Application() {
         ))
         // Size changes apply on reconnect, preserving native video resolution.
         CarPlayHostIntegration.liveSizeWidthsMm = emptyList()
+        com.carlink.core.diagnostics.EventLog.add("Startup",
+            "application ready; version ${BuildConfig.VERSION_NAME}; API ${android.os.Build.VERSION.SDK_INT}; " +
+                "elapsedRealtimeMs=${android.os.SystemClock.elapsedRealtime()}")
     }
 }

@@ -8,6 +8,7 @@ import android.media.MediaFormat
 import android.os.Build
 import android.util.DisplayMetrics
 import android.util.Log
+import java.util.concurrent.atomic.AtomicReference
 
 /** A picture size in pixels. */
 data class VideoSize(val width: Int, val height: Int) {
@@ -142,7 +143,8 @@ data class DeviceCapabilities(
     companion object {
         private const val TAG = "CarLink-Capabilities"
         @Volatile private var signalsCache: DeviceSignals? = null
-        @Volatile private var cache: DeviceCapabilities? = null
+        private data class DecoderCache(val generation: Long, val capabilities: DeviceCapabilities? = null)
+        private val cache = AtomicReference(DecoderCache(0))
 
         /** Memory, processor, ABIs and the cached GPU name. Cheap (a few small file reads); cached for the process. */
         fun signals(context: Context): DeviceSignals = signalsCache ?: run {
@@ -159,8 +161,10 @@ data class DeviceCapabilities(
             ).also { signalsCache = it }
         }
 
-        /** Drops the decoder probe (memory pressure); the next session start probes again. */
-        @Synchronized fun trimCaches() { cache = null }
+        /** Never waits for a codec probe; a probe from the retired generation cannot refill the cache. */
+        fun trimCaches() {
+            cache.updateAndGet { DecoderCache(it.generation + 1) }
+        }
 
         /** The fastest core's `cpuinfo_max_freq` in MHz, 0 when sysfs is not readable. */
         private fun cpuMaxMhz(): Int = runCatching {
@@ -192,10 +196,15 @@ data class DeviceCapabilities(
             }
         }
 
-        /** Startup warm-up and a USB start share one codec scan instead of probing concurrently. */
+        /** Concurrent worker callers share one codec scan instead of probing concurrently. */
         @Synchronized internal fun cached(panel: VideoSize, load: () -> DeviceCapabilities): DeviceCapabilities {
-            cache?.takeIf { it.panel == panel }?.let { return it }
-            return load().also { cache = it }
+            val before = cache.get()
+            before.capabilities?.takeIf { it.panel == panel }?.let { return it }
+            return load().also {
+                // Trim advances the generation without taking this probe lock. Publish only
+                // if that generation is still current; the original caller still gets its result.
+                cache.compareAndSet(before, DecoderCache(before.generation, it))
+            }
         }
 
         @Suppress("DEPRECATION") // getRealMetrics is the API-25-compatible way to read the panel.

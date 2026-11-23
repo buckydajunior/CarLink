@@ -12,7 +12,7 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [29], application = Application::class)
+@Config(sdk = [27, 29], application = Application::class)
 class SingleAppTaskTest {
     private val app: Application get() = RuntimeEnvironment.getApplication()
 
@@ -31,5 +31,17 @@ class SingleAppTaskTest {
         assertEquals(ActivityInfo.LAUNCH_SINGLE_TASK, home.launchMode)
         assertEquals(ActivityInfo.LAUNCH_SINGLE_TASK, car.launchMode)
         assertNotEquals("Home singleTask must not clear projection when opening Settings", home.taskAffinity, car.taskAffinity)
+    }
+
+    @Test fun startupWaitsForCredentialStorageAndRetainsThePrivateCrashRecorder() {
+        val pm = app.packageManager
+        val router = pm.getActivityInfo(ComponentName(app, "com.carlink.core.entry.UsbRouterActivity"), 0)
+        val wake = pm.getReceiverInfo(ComponentName(app, "com.carlink.core.entry.WiredWakeReceiver"), 0)
+        val recorder = pm.getProviderInfo(ComponentName(app, "com.shilapi.xcertplay.CrashRecordInstaller"), 0)
+        assertFalse(router.directBootAware)
+        assertFalse(wake.directBootAware)
+        assertFalse(recorder.directBootAware)
+        assertFalse(recorder.exported)
+        assertEquals("${app.packageName}.crash-record", recorder.authority)
     }
 }

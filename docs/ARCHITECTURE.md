@@ -1,4 +1,4 @@
-> **F-150 fork, version 1.3.1:** the current product has `:app` (clock/status, settings, music EQ, call audio,
+> **F-150 fork, version 1.3.2:** the current product has `:app` (clock/status, settings, music EQ, call audio,
 > About and log export), `:carlink-core` (one USB CarPlay session, USB routing/wake/reset,
 > display policy, per-renderer music PCM equalization and timing history),
 > and DiPlay's `:carplay-common` / `:carplay-shared` engine. Android Auto and the generic wireless,
@@ -32,9 +32,19 @@ Its Connected-node snapshot comes from current enumeration, not the pre-NCM inte
 A recorded detach and replacement can restart an unchanged Connected attempt after
 its existing 1.2-second grace, always behind completed teardown. Engine Retry/Progress
 wins that grace, while departure/returned evidence remains available for a later
-terminal event for up to30 seconds. First frame, explicit stop/new attempt and
+terminal event for up to 30 seconds. First frame, explicit stop/new attempt and
 callback tokens discard stale evidence/work. Manual Disconnect forbids scan recovery;
 a guarded unsuccessful retry does not reset its own recovery allowance.
+
+
+Process startup does not warm the vendor codec service without a phone. A session
+worker probes codecs only when automatic picture policy needs them. The decoder
+cache serializes worker probes but memory callbacks advance an atomic generation
+without waiting for their monitor; a pre-trim probe cannot publish into the new
+generation. USB routing waits for post-unlock credential storage. The private
+CrashRecordInstaller remains installed before Application startup; the host's
+Share connection log adds its bounded/redacted saved Java record through a small
+CarPlayHostIntegration bridge, without replacing Android crash handling.
 
 Projection retains the separate `.carplay` task but is excluded from Recents by the app manifest.
 Home supplies the visible app card. Keeping separate affinities prevents Home's `singleTask`

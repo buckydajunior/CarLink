@@ -108,6 +108,30 @@ until the Linkswell was rebooted. Desktop regressions reproduce plausible lost-r
 paths; they do not establish the precise on-device event order. The 1.3.1 physical
 unplug/replug behavior still needs testing on this Linkswell.
 
+Version 1.3.2 hardens process startup after an intermittent ignition crash report
+that also occurs without a phone; reopening the app succeeds. It removes the
+optional decoder warm-up that ran 2.5 seconds after every process start. Codec
+capabilities are still read when a USB session needs them, on its settings worker.
+Memory callbacks now invalidate the decoder cache without waiting for a slow probe;
+a probe completed after a trim cannot repopulate the retired cache generation.
+The regression blocked the old trim path while a codec load was held and passes
+with the nonblocking cache. No blanket startup delay or automatic crash restart
+loop is added. Actual cold connection timing still needs measurement on the unit.
+
+The USB router no longer advertises Direct Boot awareness: this app reads
+credential-protected settings during Application startup and must wait for unlock.
+Normal post-unlock boot/wake discovery remains. Whether this Linkswell actually
+uses file-based encryption is unknown, so this mismatch is not claimed as the
+observed crash cause. See [Android’s Direct Boot storage requirements](https://developer.android.com/privacy-and-security/direct-boot).
+
+Settings > Share connection log now includes the existing saved, redacted Java
+crash. Its byte/line-bounded report preserves the exception and host/engine frames,
+and successful reopening/export does not erase it. The record may precede the
+installed version; a missing Java record does not rule out a native crash or ANR.
+The original crash handler still delegates to Android. The exact ignition failure
+remains unconfirmed until the user returns its exception record; the new build can
+export a previously saved crash without waiting for another failure.
+
 On Android 10+, a fully background app still needs an allowed foreground launch. If F-150 CarPlay
 does not open with the tablet, use the Linkswell launcher's startup-app option if it provides one.
 The app does not bypass [Android's background-start restrictions](https://developer.android.com/guide/components/activities/secure-bal)
@@ -190,8 +214,8 @@ CarPlay is Apple's trademark. This project is independent of Apple, Ford and Lin
 
 - Four new lost-replug regressions failed against the previous implementation.
   With the fix, all four suites passed: 4,006 passed, two existing skips, no failures
-  (app36/core214/shared1985/common1773 total4,008). USB watcher/session/router targets
-  include 95 executions; the full enumeration integration cases run on API27 and29.
+  (app36/core214/shared 1985/common1773 total4,008). USB watcher/session/router targets
+  include 95 executions; the full enumeration integration cases run on API 27 and29.
 - Coverage includes early/late transport ends, failed and Connected sessions,
   incomplete teardown, missed attach broadcasts, stale/reused USB nodes, NCM versus
   bootstrap identity, engine-owned Retry/Progress, retained late return evidence,
@@ -202,9 +226,32 @@ CarPlay is Apple's trademark. This project is independent of Apple, Ford and Lin
   permissions/native entry inventory/licenses, and the new recovery paths in DEX.
   The exact same two checksum-verified public experimental upstream v1.0.16 runtime
   identity files as1.3.0 are packaged; source/signing material remains outside Git.
-- Test APK:4,329,835 bytes; SHA-256
+- Test APK: 4,329,835 bytes; SHA-256
   `494a128b6a924d519a4fe7b6db24266da5cd36fe695da529e4c1f2563cc992c8`.
 - Actual Linkswell unplug/replug, calls, ignition recovery and connection timing
   remain hardware checks. The reported clock/waiting symptom matches the reproduced
   gap, but no device log establishes the exact event order for that occurrence.
   No release/tag is published.
+
+## Version 1.3.2 validation — 2026-11-22
+
+- All four suites passed: 4,033 passed, two existing skips, no failures (app 51,
+  core 216, shared 1985, common 1783; total 4,035). The new nonblocking cache test first
+  failed against the old synchronized trim path, then all four cache cases passed.
+- API 27 checks cover post-unlock manifest contracts and inclusion/redaction of a
+  previously saved Java exception without erasing it. API 27/33 crash-record cases
+  cover host frames beyond framework frames, byte/line bounds and missing records.
+- Debug and optimized R8 local test builds passed. Full debug lint passed with
+  47 advisory warnings and no errors; resource collisions 14 reviewed/0 unreviewed.
+  No UI geometry changes or new layout renders are required.
+- Verified signed 1.3.2/10302 package, V2 update certificate, alignment, unchanged
+  permissions/ABIs/launcher/native inventory/licenses, retained nonexported crash
+  installer, DirectBootAware=false USB router, new report code and absent eager
+  codec thread in DEX. The exact same two public experimental upstream v1.0.16
+  identity files are packaged; raw runtime/signing source files remain outside Git.
+- Test APK: 4,329,835 bytes; SHA-256
+  `b177a8b8178d21588fdcbf7f87aae21b15e7adc5da0b540cc6b2affa9195644a`.
+- Previous 1.3.1 versioned APK retained; 1.3.2 mapping archived with the local output.
+  Actual ignition behavior, cold connection timing and the observed failure’s cause
+  remain unverified on the Linkswell until its saved record is returned. No tag or
+  release is published.

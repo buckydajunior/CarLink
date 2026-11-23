@@ -16,7 +16,7 @@ import java.text.SimpleDateFormat
 import java.util.Locale
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [29], application = Application::class)
+@Config(sdk = [27, 29], application = Application::class)
 class ConnectionLogTest {
     private val context: Application get() = RuntimeEnvironment.getApplication()
 
@@ -92,5 +92,32 @@ class ConnectionLogTest {
         org.junit.Assert.assertEquals("CarLink", e.tag)
         org.junit.Assert.assertEquals("start CARPLAY USB #s1", e.message)
         org.junit.Assert.assertNull(ConnectionLog.parseSaved("  signals=none"))
+    }
+
+    @Test fun exportIncludesAnEarlierSavedCrashWithoutLeakingItsSensitiveLines() {
+        val crash = File(context.filesDir, "logs/last-crash.txt")
+        crash.parentFile!!.mkdirs()
+        val original = "crash atEpochMs=1234 thread=main\n" +
+            "java.lang.IllegalStateException: startup failure at 192.168.1.20\n" +
+            "  at com.carlink.app.CarLinkApplication.onCreate(CarLinkApplication.kt:20)\n" +
+            "phoneName=PRIVATE_PHONE\npassword=PRIVATE_SECRET\npeer AA:BB:01:23:45:67\n"
+        crash.writeText(original)
+        EventLog.clear() // A reopened process has no fatal event in its new in-memory buffer.
+        val text = ConnectionLog.export(context, "Installed version 1.3.2").readText()
+        assertTrue(text.contains("Saved Java crash (may be from an earlier installed version)"))
+        assertTrue(text.contains("crash atEpochMs=1234 thread=main"))
+        assertTrue(text.contains("java.lang.IllegalStateException: startup failure at [ip]"))
+        assertTrue(text.contains("CarLinkApplication.onCreate"))
+        org.junit.Assert.assertFalse(text.contains("PRIVATE_PHONE"))
+        org.junit.Assert.assertFalse(text.contains("PRIVATE_SECRET"))
+        org.junit.Assert.assertFalse(text.contains("AA:BB:01:23:45:67"))
+        assertEquals("Export must preserve the original evidence", original, crash.readText())
+    }
+
+    @Test fun aMissingJavaCrashRecordDoesNotClaimThereWasNoCrash() {
+        File(context.filesDir, "logs/last-crash.txt").delete()
+        val text = ConnectionLog.export(context, "F-150 connection log").readText()
+        assertTrue(text.contains("No crash recorded by this version."))
+        assertTrue(text.contains("does not rule out a native crash or an unresponsive app"))
     }
 }

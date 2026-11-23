@@ -53,6 +53,86 @@ class DeviceCapabilitiesCacheTest {
         }
     }
 
+    @Test fun memoryTrimDoesNotWaitForAnInFlightProbeOrCacheItsResult() {
+        val pool = Executors.newFixedThreadPool(2)
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val trimEntered = CountDownLatch(1)
+        val trimmed = CountDownLatch(1)
+        try {
+            val first = pool.submit<DeviceCapabilities> {
+                DeviceCapabilities.cached(panel) {
+                    entered.countDown()
+                    check(release.await(5, TimeUnit.SECONDS))
+                    capabilities(panel)
+                }
+            }
+            assertTrue(entered.await(5, TimeUnit.SECONDS))
+            val trim = pool.submit {
+                trimEntered.countDown()
+                DeviceCapabilities.trimCaches()
+                trimmed.countDown()
+            }
+            assertTrue(trimEntered.await(5, TimeUnit.SECONDS))
+            assertTrue("Memory trim must not wait for the codec probe", trimmed.await(250, TimeUnit.MILLISECONDS))
+            assertFalse("The probe must still be held when trim returns", first.isDone)
+            release.countDown()
+            val old = first.get(5, TimeUnit.SECONDS)
+            trim.get(5, TimeUnit.SECONDS)
+            var loads = 0
+            val fresh = DeviceCapabilities.cached(panel) { loads++; capabilities(panel) }
+            assertNotSame("A pre-trim probe must not repopulate the cache", old, fresh)
+            assertSame(fresh, DeviceCapabilities.cached(panel) { loads++; capabilities(panel) })
+            assertEquals(1, loads)
+        } finally {
+            release.countDown()
+            pool.shutdownNow()
+            assertTrue(pool.awaitTermination(5, TimeUnit.SECONDS))
+        }
+    }
+
+    @Test fun aWaitingCallerRunsOneFreshProbeAfterConcurrentTrims() {
+        val pool = Executors.newFixedThreadPool(2)
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val waiterEntered = CountDownLatch(1)
+        val duplicateProbe = CountDownLatch(1)
+        val loads = AtomicInteger()
+        try {
+            val first = pool.submit<DeviceCapabilities> {
+                DeviceCapabilities.cached(panel) {
+                    loads.incrementAndGet()
+                    entered.countDown()
+                    check(release.await(5, TimeUnit.SECONDS))
+                    capabilities(panel)
+                }
+            }
+            assertTrue(entered.await(5, TimeUnit.SECONDS))
+            val second = pool.submit<DeviceCapabilities> {
+                waiterEntered.countDown()
+                DeviceCapabilities.cached(panel) {
+                    loads.incrementAndGet()
+                    duplicateProbe.countDown()
+                    capabilities(panel)
+                }
+            }
+            assertTrue(waiterEntered.await(5, TimeUnit.SECONDS))
+            DeviceCapabilities.trimCaches()
+            DeviceCapabilities.trimCaches()
+            assertFalse("Trim must not start a concurrent codec probe", duplicateProbe.await(100, TimeUnit.MILLISECONDS))
+            release.countDown()
+            val old = first.get(5, TimeUnit.SECONDS)
+            val fresh = second.get(5, TimeUnit.SECONDS)
+            assertNotSame(old, fresh)
+            assertSame(fresh, DeviceCapabilities.cached(panel) { loads.incrementAndGet(); capabilities(panel) })
+            assertEquals(2, loads.get())
+        } finally {
+            release.countDown()
+            pool.shutdownNow()
+            assertTrue(pool.awaitTermination(5, TimeUnit.SECONDS))
+        }
+    }
+
     @Test fun panelChangeOrMemoryTrimRequiresAFreshProbe() {
         var loads = 0
         fun read(size: VideoSize) = DeviceCapabilities.cached(size) { loads++; capabilities(size) }
