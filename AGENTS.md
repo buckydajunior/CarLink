@@ -37,6 +37,10 @@ The product targets a 2018 Ford F-150 Lariat with an unspecified Linkswell model
 
 - Startup must not eagerly probe vendor codecs with no phone. Keep memory-cache trim
   nonblocking and generation-safe against an in-flight worker probe. The app uses
-  credential-protected preferences, so USB entry points must not claim Direct Boot.
+  credential-protected preferences: only the minimal USB router may claim Direct Boot,
+  and it must queue Application, USB routing and Home initialization until actual user unlock.
+  Register then recheck unlock; refresh deferred USB nodes and discard unplugged devices.
+  Preserve saved OS USB defaults/consent and one-shot, RESUMED/Home-only projection handoff;
+  never let startup navigation override Settings, the car tile or exit to the car launcher.
   Include the existing bounded/redacted saved Java crash in explicit log exports;
   preserve Android's original uncaught-exception handling and old crash evidence.

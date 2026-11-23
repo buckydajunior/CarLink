@@ -30,6 +30,7 @@ fun CarLinkApp(vm: CarLinkViewModel, onExitToCarHome: () -> Unit) {
     val view = LocalView.current
     val lightBars = route != Route.HOME && MaterialTheme.colorScheme.background.luminance() > .5f
     SideEffect {
+        vm.onRouteRendered(route)
         (view.context as? Activity)?.window?.let { window ->
             WindowCompat.getInsetsController(window, view).apply {
                 isAppearanceLightStatusBars = lightBars
@@ -39,7 +40,12 @@ fun CarLinkApp(vm: CarLinkViewModel, onExitToCarHome: () -> Unit) {
     }
     val requests by vm.settingsRequests.collectAsStateWithLifecycle()
     LaunchedEffect(requests) { if (requests > 0) { route = Route.SETTINGS; fromCar = true } }
+    val navigate: (Route) -> Unit = { next ->
+        vm.onRouteShown(next)
+        route = next
+    }
     val back: () -> Unit = {
+        vm.cancelAutomaticProjection()
         when (route) {
             Route.ABOUT, Route.EQUALIZER, Route.CALL_AUDIO -> route = Route.SETTINGS
             Route.SETTINGS -> {
@@ -52,9 +58,9 @@ fun CarLinkApp(vm: CarLinkViewModel, onExitToCarHome: () -> Unit) {
     }
     BackHandler(onBack = back)
     when (route) {
-        Route.HOME -> WiredHomeScreen(vm) { route = it }
-        Route.SETTINGS -> WiredSettingsScreen(vm, onBack = back, onAbout = { route = Route.ABOUT },
-            onEqualizer = { route = Route.EQUALIZER }, onCallAudio = { route = Route.CALL_AUDIO })
+        Route.HOME -> WiredHomeScreen(vm, navigate)
+        Route.SETTINGS -> WiredSettingsScreen(vm, onBack = back, onAbout = { navigate(Route.ABOUT) },
+            onEqualizer = { navigate(Route.EQUALIZER) }, onCallAudio = { navigate(Route.CALL_AUDIO) })
         Route.EQUALIZER -> EqualizerScreen(vm, onBack = back)
         Route.CALL_AUDIO -> CallAudioScreen(vm, onBack = back)
         Route.ABOUT -> AboutScreen(onBack = back)

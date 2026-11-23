@@ -118,11 +118,28 @@ The regression blocked the old trim path while a codec load was held and passes
 with the nonblocking cache. No blanket startup delay or automatic crash restart
 loop is added. Actual cold connection timing still needs measurement on the unit.
 
-The USB router no longer advertises Direct Boot awareness: this app reads
-credential-protected settings during Application startup and must wait for unlock.
-Normal post-unlock boot/wake discovery remains. Whether this Linkswell actually
-uses file-based encryption is unknown, so this mismatch is not claimed as the
-observed crash cause. See [Android’s Direct Boot storage requirements](https://developer.android.com/privacy-and-security/direct-boot).
+Version 1.3.3 corrects a USB startup regression in 1.3.2. Removing the router's
+Direct Boot eligibility could exclude this app from Android 8.1's saved-default USB
+dispatch while the user was still locked. The saved default itself is not erased.
+The minimal router is eligible again, but all Application settings, private files,
+authentication, USB session work and Home UI initialization wait for actual user
+unlock. A main-thread FIFO registers for unlock and rechecks after registration;
+Application setup precedes the latest retained USB attach. Deferred attach work
+refreshes the currently enumerated iPhone and discards a phone unplugged during boot.
+No private settings or identity files are moved to device-protected storage.
+See [Android’s Direct Boot storage requirements](https://developer.android.com/privacy-and-security/direct-boot)
+and [Android 8.1 USB default dispatch](https://github.com/aosp-mirror/platform_frameworks_base/blob/android-8.1.0_r1/services/usb/java/com/android/server/usb/UsbProfileGroupSettingsManager.java).
+
+A USB-started clock screen also carries a one-shot projection handoff: when its
+Home route is resumed and the session is Connected, it returns to the existing
+projection. Settings, EQ, About, the car tile and exiting to the Linkswell launcher
+cancel that handoff. Ordinary manual Home launches do not request it. An already
+connected system USB dispatch arms the same handoff only for a visible Home route,
+then waits for Home to resume before reordering projection. It never starts a second
+session or brings a stopped Home over another app. This addresses the reported extra Open CarPlay tap after accepting the
+USB dialog; physical ignition/default retention still needs testing on this unit.
+There is no fixed startup delay or background restart loop. Android still owns USB
+consent/default selection; this app cannot silently grant access or save a default.
 
 Settings > Share connection log now includes the existing saved, redacted Java
 crash. Its byte/line-bounded report preserves the exception and host/engine frames,
@@ -255,3 +272,32 @@ CarPlay is Apple's trademark. This project is independent of Apple, Ford and Lin
   Actual ignition behavior, cold connection timing and the observed failure’s cause
   remain unverified on the Linkswell until its saved record is returned. No tag or
   release is published.
+
+## Version 1.3.3 validation — 2026-11-23
+
+- All four suites passed: 4,092 passed, two existing skips, no failures (app 85,
+  core 241, shared 1985, common 1783; 4,094 total). Resource collisions remain
+  14 reviewed/0 unreviewed.
+- API 27/29 USB cases cover locked startup, initialization order, stale/unplugged
+  nodes, latest attach replacement, destroyed router ownership and Connected dispatch
+  without a second session. Ten pure queue cases cover registration races, FIFO,
+  replacement/cancellation, duplicate signals and immediate unlocked startup.
+- Forty focused API 27/29 app/manifest checks cover actual locked Application/Home,
+  RESUMED/Home-only one-shot handoff, Settings/EQ/About/car-tile/launcher overrides,
+  weak visible-Home callbacks and saved-state marker consumption. The car-settings
+  race first failed before its guard; immediate USB callbacks and an old HOME frame
+  can no longer override the requested Settings route before it renders.
+- Debug, optimized R8 and full debug lint passed (47 advisory warnings/no errors).
+  No layout geometry changed; existing native screen gallery is retained.
+- Verified 1.3.3/10303 package, same V2 update certificate and alignment, minimal
+  DirectBootAware=true router with private components unaware, new handoff/gate code
+  and final route-render guard in the R8 mapping. Permissions, ABIs, one launcher,
+  all 15 native binaries, six license assets and the same two verified public upstream
+  v1.0.16 experimental identity files are unchanged. Raw identity/signing assets stay
+  outside Git.
+- Test APK: 4,346,219 bytes; SHA-256
+  `2ba7e82c465c97e885a394dcb5c257a4dff24e1be8b7f24a1df18fce1bde65d7`. Previous 1.3.2 APK retained; matching 1.3.3 mapping archived.
+  Actual Linkswell cold-start/default retention, USB reconnect, calls and connection
+  timing remain hardware checks. Android owns consent/default selection; this
+  build does not suppress required dialogs or establish the older crash's cause.
+  No tag/release is published.

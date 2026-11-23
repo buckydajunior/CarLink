@@ -22,7 +22,7 @@
             </intent-filter>
         </receiver>
         <activity android:name="com.carlink.core.entry.UsbRouterActivity"
-            android:directBootAware="false" android:excludeFromRecents="true" android:exported="true"
+            android:directBootAware="true" android:excludeFromRecents="true" android:exported="true"
             android:noHistory="true" android:taskAffinity="${applicationId}.usb" android:theme="@style/Theme.CarLink.Invisible">
             <intent-filter><action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" /></intent-filter>
             <meta-data android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" android:resource="@xml/carlink_usb_device_filter" />

@@ -11,6 +11,8 @@ import com.shilapi.xcertplay.AirPlayPersistence
 interface CarLinkHost {
     enum class OpenReason { USB_ATTACHED, UNPLUGGED }
     fun openHome(context: Context, reason: OpenReason)
+    /** Return a visible idle Home to connected projection after USB dispatch; never create a session. */
+    fun openProjection(context: Context) = Unit
 }
 
 /** The wired receiver's host screen, accessory name and lightweight waiting-view factory. */

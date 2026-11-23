@@ -33,12 +33,12 @@ class SingleAppTaskTest {
         assertNotEquals("Home singleTask must not clear projection when opening Settings", home.taskAffinity, car.taskAffinity)
     }
 
-    @Test fun startupWaitsForCredentialStorageAndRetainsThePrivateCrashRecorder() {
+    @Test fun earlyUsbDispatchIsAvailableWhilePrivateComponentsWaitForUnlock() {
         val pm = app.packageManager
         val router = pm.getActivityInfo(ComponentName(app, "com.carlink.core.entry.UsbRouterActivity"), 0)
         val wake = pm.getReceiverInfo(ComponentName(app, "com.carlink.core.entry.WiredWakeReceiver"), 0)
         val recorder = pm.getProviderInfo(ComponentName(app, "com.shilapi.xcertplay.CrashRecordInstaller"), 0)
-        assertFalse(router.directBootAware)
+        assertTrue(router.directBootAware)
         assertFalse(wake.directBootAware)
         assertFalse(recorder.directBootAware)
         assertFalse(recorder.exported)

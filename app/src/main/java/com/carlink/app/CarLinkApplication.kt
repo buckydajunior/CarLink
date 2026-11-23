@@ -13,6 +13,11 @@ import com.shilapi.xcertplay.CarPlayHostIntegration
 class CarLinkApplication : Application() {
     override fun onCreate() {
         super.onCreate()
+        com.carlink.core.entry.AfterUserUnlock.run(this, this) { initializeUnlocked() }
+    }
+
+    /** The early USB router may start this process before credential storage is available. */
+    private fun initializeUnlocked() {
         F150Profile.install(this)
         com.carlink.app.ui.applyScreenType(com.carlink.app.ui.UiPreferences(this).uiProfileMode)
         CarPlayHostIntegration.homeActivity = HomeActivity::class.java

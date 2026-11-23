@@ -1,4 +1,4 @@
-> **F-150 fork, version 1.3.2:** the current product has `:app` (clock/status, settings, music EQ, call audio,
+> **F-150 fork, version 1.3.3:** the current product has `:app` (clock/status, settings, music EQ, call audio,
 > About and log export), `:carlink-core` (one USB CarPlay session, USB routing/wake/reset,
 > display policy, per-renderer music PCM equalization and timing history),
 > and DiPlay's `:carplay-common` / `:carplay-shared` engine. Android Auto and the generic wireless,
@@ -41,8 +41,22 @@ Process startup does not warm the vendor codec service without a phone. A sessio
 worker probes codecs only when automatic picture policy needs them. The decoder
 cache serializes worker probes but memory callbacks advance an atomic generation
 without waiting for their monitor; a pre-trim probe cannot publish into the new
-generation. USB routing waits for post-unlock credential storage. The private
-CrashRecordInstaller remains installed before Application startup; the host's
+generation. Only the minimal USB router is Direct-Boot-aware, retaining eligibility
+for Android's saved-default dispatch during early boot. `AfterUserUnlock` holds
+Application initialization, USB routing and Home UI until UserManager reports
+credential storage available. The FIFO registers then rechecks to close the missed
+unlock race; keyed replacement retains only the latest early USB event, refreshed
+against current enumeration before routing. No authentication/preferences are moved
+to device-protected storage. Normal unlocked startup executes immediately.
+
+USB-started Home carries a one-shot request to return to existing projection only
+when its HOME route is RESUMED and the session is Connected. User navigation, the
+car tile and exit cancel it. A connected USB router callback arms only a weakly
+referenced STARTED Home on HOME; it never brings a stopped Home over another app.
+Ordinary Home entry has no automatic request. Separate task affinities are retained.
+
+The private, encryption-unaware CrashRecordInstaller remains under Android's normal
+provider lifecycle (installed after unlock if the process started in Direct Boot).
 Share connection log adds its bounded/redacted saved Java record through a small
 CarPlayHostIntegration bridge, without replacing Android crash handling.
 

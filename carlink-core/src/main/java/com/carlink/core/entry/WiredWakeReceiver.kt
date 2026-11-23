@@ -8,11 +8,16 @@ import android.content.Intent
 class WiredWakeReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action in ACTIONS) {
-            com.carlink.core.diagnostics.EventLog.add("USB", "boot/ignition wake: ${intent.action}")
-            UsbWatcher.get(context).onWake()
+            val app = context.applicationContext
+            val action = intent.action
+            AfterUserUnlock.run(app, WAKE_KEY) {
+                com.carlink.core.diagnostics.EventLog.add("USB", "boot/ignition wake: $action")
+                UsbWatcher.get(app).onWake()
+            }
         }
     }
     companion object {
+        private val WAKE_KEY = Any()
         internal val ACTIONS = setOf(
             Intent.ACTION_BOOT_COMPLETED,
             "android.intent.action.QUICKBOOT_POWERON",

@@ -12,6 +12,7 @@ import com.carlink.app.F150Profile
 import com.carlink.app.R
 import com.carlink.app.diagnostics.CarLinkFileProvider
 import com.carlink.app.diagnostics.ConnectionLog
+import com.carlink.app.entry.HomeLauncher
 import com.carlink.app.ui.theme.RenderingMode
 import com.carlink.app.ui.theme.RenderingPolicy
 import com.carlink.app.ui.theme.ThemeMode
@@ -28,7 +29,6 @@ import com.carlink.core.settings.SystemBarPreferences
 import com.carlink.core.audio.EqualizerController
 import com.carlink.core.audio.EqualizerSettings
 import com.shilapi.xcertplay.AirPlayPersistence
-import com.shilapi.xcertplay.CarPlayHostActivity
 import com.shilapi.xcertplay.airplay.AirPlayPhysicalSizeBasis
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -62,6 +62,9 @@ class CarLinkViewModel(application: Application) : AndroidViewModel(application)
     private val _permissionsNeeded = MutableStateFlow(missingPermissions().isNotEmpty())
     private val _carPlayWidth = MutableStateFlow(AirPlayPersistence.loadWidthPhysicalMm(app))
     private val _settingsRequests = MutableStateFlow(0L)
+    private val _usbStartupPending = MutableStateFlow(false)
+    private val _visibleRoute = MutableStateFlow<Route?>(null)
+    private var awaitingCarSettingsFrame = false
     private val _systemBars = MutableStateFlow(bars.load())
     private val _equalizer = MutableStateFlow(EqualizerController.loadSettings(app))
     private val _callEchoCancellation = MutableStateFlow(AirPlayPersistence.loadCallEchoCancellation(app))
@@ -80,6 +83,12 @@ class CarLinkViewModel(application: Application) : AndroidViewModel(application)
     val systemBars = _systemBars.asStateFlow()
     val equalizer = _equalizer.asStateFlow()
     val callEchoCancellation = _callEchoCancellation.asStateFlow()
+    /** Collected only while HomeActivity is RESUMED; route restoration must finish first. */
+    internal val automaticProjectionReady = combine(link, _usbStartupPending, _visibleRoute) { state, pending, route ->
+        pending && route == Route.HOME && state.stage == LinkStage.CONNECTED
+    }
+    internal val usbStartupPending: Boolean get() = _usbStartupPending.value
+    internal val isHomeRouteVisible: Boolean get() = _visibleRoute.value == Route.HOME
 
     private val usbReceiver = object : android.content.BroadcastReceiver() {
         override fun onReceive(context: android.content.Context, intent: Intent) {
@@ -98,13 +107,42 @@ class CarLinkViewModel(application: Application) : AndroidViewModel(application)
 
     fun connectUsb() = session.connectUsb()
     fun retry() = session.retry()
-    fun disconnect() = session.disconnect()
-    fun openSettingsFromCar() { _settingsRequests.value++ }
+    fun disconnect() { cancelAutomaticProjection(); session.disconnect() }
+    fun openSettingsFromCar() {
+        awaitingCarSettingsFrame = true
+        onRouteShown(Route.SETTINGS)
+        _settingsRequests.value++
+    }
+
+    internal fun requestUsbStartupProjection() {
+        if (_visibleRoute.value == null || _visibleRoute.value == Route.HOME) _usbStartupPending.value = true
+    }
+
+    internal fun cancelAutomaticProjection() { _usbStartupPending.value = false }
+
+    internal fun onRouteShown(route: Route) {
+        // An old HOME SideEffect can precede the Settings navigation effect. Keep the
+        // driver's requested route authoritative until Settings has actually rendered.
+        if (awaitingCarSettingsFrame && route != Route.SETTINGS) return
+        _visibleRoute.value = route
+        if (route != Route.HOME) cancelAutomaticProjection()
+    }
+
+    internal fun onRouteRendered(route: Route) {
+        if (route == Route.SETTINGS) awaitingCarSettingsFrame = false
+        onRouteShown(route)
+    }
+
+    internal fun openStartupProjectionIfReady() {
+        if (!_usbStartupPending.value || _visibleRoute.value != Route.HOME || link.value.stage != LinkStage.CONNECTED) return
+        _usbStartupPending.value = false // Consume before launching: returning Home must not open it again.
+        returnToProjection()
+    }
 
     fun returnToProjection() {
         if (link.value.stage != LinkStage.CONNECTED) return
-        app.startActivity(Intent(app, CarPlayHostActivity::class.java)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
+        cancelAutomaticProjection()
+        HomeLauncher.returnToExistingProjection(app)
     }
 
     fun refresh() {
