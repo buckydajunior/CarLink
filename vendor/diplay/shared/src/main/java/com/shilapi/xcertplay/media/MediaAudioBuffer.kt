@@ -27,11 +27,16 @@ object MediaAudioBuffer {
     data class Plan(val trackBufferBytes: Int, val startBytes: Int)
 
     /** AudioTrack capacity and the amount to queue before play() for one output stream. */
-    fun plan(isMedia: Boolean, sampleRate: Int, channels: Int, minBufferBytes: Int, mediaMillis: Int): Plan {
+    fun plan(isMedia: Boolean, sampleRate: Int, channels: Int, minBufferBytes: Int, mediaMillis: Int,
+        isTelephony: Boolean = false): Plan {
         val lowLatency = Plan(
             trackBufferBytes = maxOf(minBufferBytes * 4, MIN_TRACK_BUFFER_BYTES),
             startBytes = maxOf(minBufferBytes, MIN_START_BUFFER_BYTES),
         )
+        // CarLink: a call needs one 20ms PCM frame, or the device minimum, before play().
+        // A fixed 4KiB floor alone accumulated 128ms at 16kHz mono (256ms at 8kHz).
+        // Keep track capacity unchanged, and identify calls before any call-as-media routing.
+        if (isTelephony) return lowLatency.copy(startBytes = maxOf(minBufferBytes, callFrameBytes(sampleRate, channels)))
         if (!isMedia) return lowLatency
         val bytesPerSecond = sampleRate.toLong() * channels.coerceIn(1, 2) * 2
         val start = (bytesPerSecond * sanitize(mediaMillis) / 1000).toInt()
@@ -40,6 +45,21 @@ object MediaAudioBuffer {
             trackBufferBytes = maxOf(capacity, lowLatency.trackBufferBytes),
             startBytes = maxOf(start, lowLatency.startBytes),
         )
+    }
+
+    // CarLink: frame-aligned initial writes must fit a paused track before play() can run.
+    fun callWriteChunkBytes(sampleRate: Int, channels: Int, actualCapacityBytes: Int): Int {
+        val frameBytes = channels.coerceIn(1, 2) * 2
+        val packetBytes = callFrameBytes(sampleRate, channels)
+        if (actualCapacityBytes <= 0) return packetBytes
+        val halfCapacity = actualCapacityBytes / 2 / frameBytes * frameBytes
+        return minOf(packetBytes, halfCapacity.coerceAtLeast(frameBytes))
+    }
+
+    private fun callFrameBytes(sampleRate: Int, channels: Int): Int {
+        val frames = (sampleRate.coerceAtLeast(1).toLong() * 20 / 1000).coerceAtLeast(1)
+        val frameBytes = channels.coerceIn(1, 2) * 2
+        return (frames.coerceAtMost(Int.MAX_VALUE.toLong() / frameBytes) * frameBytes).toInt()
     }
 
     /**

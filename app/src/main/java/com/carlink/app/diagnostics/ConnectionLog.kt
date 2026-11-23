@@ -1,9 +1,9 @@
 package com.carlink.app.diagnostics
 
 import android.content.Context
-import com.carlink.core.detect.ExternalBluetoothProbe
 import com.carlink.core.diagnostics.EventLog
 import com.carlink.core.diagnostics.LogMasking
+import com.shilapi.xcertplay.CarPlayHostIntegration
 import java.io.File
 import java.io.RandomAccessFile
 import java.text.SimpleDateFormat
@@ -12,37 +12,23 @@ import java.util.Date
 import java.util.Locale
 
 /** Where a connection-log line came from. */
-enum class LogSource { CARPLAY, ANDROID_AUTO, CARLINK }
+enum class LogSource { CARPLAY, CARLINK }
 
 /** One line of the combined connection log. [level] is V/D/I/W/E/A when the source records it. */
 data class LogLine(val timeMillis: Long, val source: LogSource, val level: Char?, val text: String) {
-    val isProblem: Boolean get() = level == 'E' || level == 'A' || level == 'W'
 }
 
-/**
- * The combined connection log Diagnostics shows: DiAuto's journal (written by the `:aa`
- * process to `files/diagnostics/`), DiPlay's session log (`files/logs/diplay.log`) and
- * CarLink's own [EventLog]. All three files belong to this app, so the main process reads them
- * directly. Call [read] and [export] off the main thread.
- */
+/** Merges bounded wired CarPlay logs with this app's saved timing events for export. */
 object ConnectionLog {
     /** Lines kept per source; the screen shows the newest first. */
     const val LINES_PER_SOURCE = 400
     private const val TAIL_BYTES = 192 * 1024L
 
-    fun diAutoFiles(context: Context): List<File> =
-        File(context.filesDir, "diagnostics").let { listOf(File(it, "previous.log"), File(it, "current.log")) }
-
     fun diPlayFiles(context: Context): List<File> =
         File(context.filesDir, "logs").let { listOf(File(it, "previous.log"), File(it, "diplay.log")) }
 
-    /** A cheap fingerprint of the engine log files, to skip re-reading when nothing changed. */
-    fun stamp(context: Context): Long =
-        (diAutoFiles(context) + diPlayFiles(context)).fold(17L) { acc, f -> acc * 31 + f.length() * 7 + f.lastModified() }
-
-    /** Each engine's recent lines, oldest first: DiAuto, then DiPlay. */
+    /** Wired CarPlay's recent lines, oldest first. */
     fun readEngines(context: Context): List<List<LogLine>> = listOf(
-        parseDiAuto(diAutoFiles(context).flatMap { tail(it) }).takeLast(LINES_PER_SOURCE),
         diPlayFiles(context).flatMap { file -> parseDiPlay(tail(file), file.lastModified()) }.takeLast(LINES_PER_SOURCE),
     )
 
@@ -77,20 +63,6 @@ object ConnectionLog {
     /** Merges sources given oldest first into one list, newest first; same-millisecond lines keep their order reversed. */
     fun merge(vararg sources: List<LogLine>): List<LogLine> =
         sources.toList().flatMap { it.asReversed() }.sortedByDescending { it.timeMillis }
-
-    /**
-     * DiAuto: "<epoch millis> [<android.util.Log priority>] <message>", already redacted by
-     * DiAuto; addresses are masked again in case an older build wrote the file.
-     */
-    fun parseDiAuto(lines: List<String>): List<LogLine> = lines.mapNotNull { raw ->
-        val match = DIAUTO_LINE.matchEntire(raw.trimEnd()) ?: return@mapNotNull null
-        val time = match.groupValues[1].toLongOrNull() ?: return@mapNotNull null
-        val level = when (match.groupValues[2].toIntOrNull()) {
-            2 -> 'V'; 3 -> 'D'; 4 -> 'I'; 5 -> 'W'; 6 -> 'E'; 7 -> 'A'
-            else -> null
-        }
-        LogLine(time, LogSource.ANDROID_AUTO, level, LogMasking.mask(match.groupValues[3]))
-    }
 
     /**
      * DiPlay: a header "DiPlay log started yyyy-MM-dd HH:mm:ss.SSS …", then "HH:mm:ss.SSS  <message>".
@@ -164,32 +136,26 @@ object ConnectionLog {
         }
     }
 
-    /** The shared log's header followed by the probe's block. */
-    fun withProbe(header: String, probeBlock: String): String = "$header\n\n$probeBlock"
-
     fun sourceTag(source: LogSource): String = when (source) {
         LogSource.CARPLAY -> "CP"
-        LogSource.ANDROID_AUTO -> "AA"
         LogSource.CARLINK -> "CL"
     }
 
-    /**
-     * Writes the combined log into the shared cache folder and returns it (see CarLinkFileProvider).
-     * The car stereo's Bluetooth probe follows the header as one block: it says which external
-     * module route a stereo needs (design/EXTERNAL_BLUETOOTH.md).
-     */
+    /** Writes a bounded USB report to the private share cache, with no radio or device probes. */
     fun export(context: Context, header: String): File {
         val dir = File(context.cacheDir, CarLinkFileProvider.SHARED_DIR).apply { mkdirs() }
         dir.listFiles()?.forEach { it.delete() }
         val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
-        val stereo = runCatching { ExternalBluetoothProbe.await(context).format() }.getOrElse { "External Bluetooth probe: failed (${it.message})" }
-        return File(dir, "carlink-connection-log-$stamp.txt").apply { writeText(format(read(context), withProbe(header, stereo))) }
+        return File(dir, "carlink-connection-log-$stamp.txt").apply {
+            writeText(format(read(context), "$header\nConnection: USB CarPlay") +
+                "\nSaved Java crash (may be from an earlier installed version)\n" +
+                CarPlayHostIntegration.lastCrashReport(context) +
+                "\nA missing Java record does not rule out a native crash or an unresponsive app.\n")
+        }
     }
 
     private fun headerFormat() = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US)
 
-    // DiAuto prefixes the logging thread's id ("[2] ") to each message; it is noise here.
-    private val DIAUTO_LINE = Regex("(\\d{10,})\\s+\\[(\\d)]\\s?(?:\\[\\d+]\\s)?(.*)")
     private val DIPLAY_LINE = Regex("(\\d{2}):(\\d{2}):(\\d{2})\\.(\\d{3})\\s+(.*)")
     private val DIPLAY_HEADER = Regex("DiPlay log started (\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}\\.\\d{3})")
 }

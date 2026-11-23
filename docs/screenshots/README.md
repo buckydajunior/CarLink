@@ -1,3 +1,12 @@
+> **F-150 fork:** the active gallery is `f150/`: 13 states at three shapes, in dark/light
+> (78 half-size WebP renders). Landscape head unit is 1024×600 dp, portrait head unit 768×1024 dp,
+> and phone 400×860 dp. Run `:app:recordScreenshots`; `-Pcarlink.only=<regex>` filters file names.
+> [Call audio on](f150/f150_call-audio_f150-headunit_dark.webp),
+> [off](f150/f150_call-audio-off_f150-headunit_dark.webp),
+> [phone](f150/f150_call-audio_f150-phone_dark.webp).
+> These are simulated UI states, not actual CarPlay or head-unit captures. Each scrollable page
+> shows its first screenful. The index below describes the removed upstream UI and is historical.
+
 # CarLink UI screenshots
 
 An index of every CarLink screen state, rendered by

@@ -18,16 +18,11 @@ MODULES = {
     "carlink-core": Path("carlink-core/src/main/res"),
     "carplay-common": Path("vendor/diplay/common/src/main/res"),
     "carplay-shared": Path("vendor/diplay/shared/src/main/res"),
-    "androidauto": Path("vendor/diauto/app/src/main/res"),
-    "androidauto-github": Path("vendor/diauto/app/src/github/res"),
-    "androidauto-contract": Path("vendor/diauto/contract/src/main/res"),
 }
 # Modules belonging to the same engine may legitimately override each other.
 ENGINE = {
     "app": "app", "carlink-core": "app",
     "carplay-common": "carplay", "carplay-shared": "carplay",
-    "androidauto": "androidauto", "androidauto-github": "androidauto",
-    "androidauto-contract": "androidauto",
 }
 VALUE_TAGS = {
     "string": "string", "plurals": "plurals", "string-array": "array", "array": "array",

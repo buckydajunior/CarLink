@@ -6,6 +6,7 @@ import android.content.Context
 import android.database.Cursor
 import android.net.Uri
 import java.io.File
+import java.io.RandomAccessFile // CarLink: bound host crash-report reads.
 import java.util.Collections
 import java.util.IdentityHashMap
 
@@ -20,6 +21,8 @@ internal object CrashRecord {
     private const val MAX_FRAMES = 12
     private const val MAX_OWN_FRAMES = 6
     private const val MAX_MESSAGE = 120
+    private const val MAX_REPORT_BYTES = 64 * 1024 // CarLink: corrupt/older records cannot grow the export without bound.
+    private const val MAX_REPORT_LINES = 96 // CarLink: includes the bounded cause/frame chain.
     private var installed = false
 
     @Synchronized fun install(context: Context) {
@@ -51,7 +54,7 @@ internal object CrashRecord {
             val rest = frames.drop(MAX_FRAMES)
             val own = rest.filter(::ownFrame).take(MAX_OWN_FRAMES)
             if (own.isNotEmpty()) {
-                appendLine("  ... DiPlay frames further down:")
+                appendLine("  ... App/engine frames further down:") // CarLink: host frames are retained too.
                 own.forEach { appendLine("  at $it") }
             }
             if (rest.size > own.size) appendLine("  ... ${rest.size - own.size} more")
@@ -60,12 +63,28 @@ internal object CrashRecord {
     }
 
     private fun ownFrame(frame: StackTraceElement): Boolean =
-        frame.className.startsWith("com.shilapi.") || frame.className.startsWith("com.shihab.")
+        frame.className.startsWith("com.shilapi.") || frame.className.startsWith("com.shihab.") ||
+            frame.className.startsWith("com.carlink.") // CarLink: framework errors must retain the host startup caller.
 
     fun report(context: Context): String {
         val file = File(context.filesDir, FILE)
         if (!file.isFile) return "No crash recorded by this version."
-        return runCatching { file.readLines().mapNotNull(DiagnosticRedactor::redact).joinToString("\n") }
+        return runCatching {
+            // CarLink: preserve the existing redactor while bounding bytes/lines before export.
+            RandomAccessFile(file, "r").use { input ->
+                val size = input.length()
+                val start = (size - MAX_REPORT_BYTES).coerceAtLeast(0)
+                input.seek(start)
+                val bytes = ByteArray((size - start).toInt())
+                input.readFully(bytes)
+                val lines = String(bytes, Charsets.UTF_8).lines().let { if (start > 0) it.drop(1) else it }
+                val kept = lines.takeLast(MAX_REPORT_LINES)
+                buildString {
+                    if (start > 0 || lines.size > MAX_REPORT_LINES) appendLine("Older crash record content omitted.")
+                    append(kept.mapNotNull(DiagnosticRedactor::redact).joinToString("\n"))
+                }
+            }
+        }
             .getOrElse { "Crash record unreadable: ${it.javaClass.simpleName}" }
     }
 }

@@ -11,7 +11,7 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [33], manifest = Config.NONE)
+@Config(sdk = [27, 33], manifest = Config.NONE) // CarLink: this head unit runs Android 8.1.
 class CrashRecordTest {
     private val context get() = RuntimeEnvironment.getApplication()
 
@@ -43,7 +43,7 @@ class CrashRecordTest {
 
         assertTrue(record.contains("  at android.app.Activity.startActivity11(Activity.java:11)"))
         assertFalse(record.contains("startActivity12"))
-        assertTrue(record.contains("  ... DiPlay frames further down:"))
+        assertTrue(record.contains("  ... App/engine frames further down:")) // CarLink: includes the embedding host.
         assertTrue(record.contains("  at com.shilapi.xcertplay.DiPlayActivity.open0(DiPlayActivity.kt:0)"))
         assertTrue(record.contains("  at com.shilapi.xcertplay.DiPlayActivity.open5(DiPlayActivity.kt:5)"))
         assertFalse(record.contains("open6"))
@@ -67,5 +67,38 @@ class CrashRecordTest {
         file.writeText(CrashRecord.format("main", IllegalStateException("surface released at 192.168.1.20"), 5L))
         val report = CrashRecord.report(context)
         assertTrue(report, report.startsWith("crash atEpochMs=5 thread=main\njava.lang.IllegalStateException: surface released at [ip]"))
+    }
+
+    // CarLink: startup failures can have framework frames before the embedding Application caller.
+    @Test fun theEmbeddingHostsFramesFurtherDownAreRetained() {
+        val framework = Array(15) { StackTraceElement("android.app.ContextImpl", "getSharedPreferences$it", "ContextImpl.java", it) }
+        val crash = IllegalStateException("SharedPreferences unavailable before unlock")
+        crash.stackTrace = framework + StackTraceElement("com.carlink.app.CarLinkApplication", "onCreate", "CarLinkApplication.kt", 15)
+        assertTrue(CrashRecord.format("main", crash, 0).contains("com.carlink.app.CarLinkApplication.onCreate"))
+    }
+
+    // CarLink: public host diagnostics must not read a corrupt/legacy record without bounds.
+    @Test fun aLargeRecordIsBoundedBeforeRedactionAndKeepsItsRecentEvidence() {
+        val file = File(context.filesDir, "logs/last-crash.txt")
+        file.parentFile!!.mkdirs()
+        file.writeText("OLD_RECORD" + "x".repeat(100_000) + "\n" +
+            "crash atEpochMs=1234 thread=main\njava.lang.IllegalStateException: recent failure\n")
+        val report = CarPlayHostIntegration.lastCrashReport(context)
+        assertTrue(report.startsWith("Older crash record content omitted."))
+        assertTrue(report.contains("recent failure"))
+        assertFalse(report.contains("OLD_RECORD"))
+        assertTrue(report.length < 66_000)
+    }
+
+    // CarLink: byte-small records can still have excessive line counts.
+    @Test fun aManyLineRecordIsExplicitlyTruncated() {
+        val file = File(context.filesDir, "logs/last-crash.txt")
+        file.parentFile!!.mkdirs()
+        file.writeText((0..150).joinToString("\n") { "frame $it" })
+        val report = CrashRecord.report(context)
+        assertTrue(report.startsWith("Older crash record content omitted."))
+        assertTrue(report.lines().size <= 98)
+        assertTrue(report.contains("frame 150"))
+        assertFalse(report.contains("frame 0\n"))
     }
 }

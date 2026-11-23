@@ -1,3 +1,105 @@
+> **F-150 fork, version 1.3.3:** the current product has `:app` (clock/status, settings, music EQ, call audio,
+> About and log export), `:carlink-core` (one USB CarPlay session, USB routing/wake/reset,
+> display policy, per-renderer music PCM equalization and timing history),
+> and DiPlay's `:carplay-common` / `:carplay-shared` engine. Android Auto and the generic wireless,
+> setup, updater and switcher layers described below were removed. See the root README and AGENTS.md
+> for the active build and device-test workflow. The remainder is retained as upstream history.
+
+The current Home and engine waiting surface both use `IdleClockView`: native `TextClock` widgets
+for local time/date, static background, live session status and recovery actions. Native clock
+updates are attached to the view lifecycle; authentication does not wait for Compose or a timer.
+`IdleConnectionUi` maps actual session states to waiting/connecting/connected/attention, preserving
+permission, VPN and missing-auth recovery. Android's mandatory launch window stays blank and brief.
+`SystemBarPreferences` writes DiPlay's original hide-top/hide-bottom keys independently; the host
+re-reads them and applies its existing window-inset logic on resume.
+
+Startup/wake discovery in `UsbWatcher` performs an immediate scan plus a bounded 30-second
+enumeration window, canceled once a phone is listed. A wake or visible Home may recover a
+previously handled inactive session through `SessionManager.onUsbReady`; scan-sourced discovery
+respects manual Disconnect, including notification Disconnect. Real USB attach keeps its own
+existing re-enumeration guard. `CarPlayForegroundGate` is installed before discovery, tracks
+resumed Activities with weak references and gives each deferred launch a cancelable generation.
+An already-resumed Activity can launch projection without waiting for another resume callback.
+Fully background Android 10+ startup remains deferred until an allowed foreground entry.
+
+Replug recovery retains a temporarily declined USB attach through the automatic
+10-second terminal-event guard and admits one fresh-device retry. Watcher/router
+claims are released when admission returns false. A relevant detach starts bounded
+30-second enumeration through normal admission rules; stale removed nodes are
+ignored until replacement/observed absence, including later address reuse. The
+session confirms absence even in Idle/Failed and clears automatic suppression.
+Its Connected-node snapshot comes from current enumeration, not the pre-NCM intent.
+A recorded detach and replacement can restart an unchanged Connected attempt after
+its existing 1.2-second grace, always behind completed teardown. Engine Retry/Progress
+wins that grace, while departure/returned evidence remains available for a later
+terminal event for up to 30 seconds. First frame, explicit stop/new attempt and
+callback tokens discard stale evidence/work. Manual Disconnect forbids scan recovery;
+a guarded unsuccessful retry does not reset its own recovery allowance.
+
+
+Process startup does not warm the vendor codec service without a phone. A session
+worker probes codecs only when automatic picture policy needs them. The decoder
+cache serializes worker probes but memory callbacks advance an atomic generation
+without waiting for their monitor; a pre-trim probe cannot publish into the new
+generation. Only the minimal USB router is Direct-Boot-aware, retaining eligibility
+for Android's saved-default dispatch during early boot. `AfterUserUnlock` holds
+Application initialization, USB routing and Home UI until UserManager reports
+credential storage available. The FIFO registers then rechecks to close the missed
+unlock race; keyed replacement retains only the latest early USB event, refreshed
+against current enumeration before routing. No authentication/preferences are moved
+to device-protected storage. Normal unlocked startup executes immediately.
+
+USB-started Home carries a one-shot request to return to existing projection only
+when its HOME route is RESUMED and the session is Connected. User navigation, the
+car tile and exit cancel it. A connected USB router callback arms only a weakly
+referenced STARTED Home on HOME; it never brings a stopped Home over another app.
+Ordinary Home entry has no automatic request. Separate task affinities are retained.
+
+The private, encryption-unaware CrashRecordInstaller remains under Android's normal
+provider lifecycle (installed after unlock if the process started in Direct Boot).
+Share connection log adds its bounded/redacted saved Java record through a small
+CarPlayHostIntegration bridge, without replacing Android crash handling.
+
+Projection retains the separate `.carplay` task but is excluded from Recents by the app manifest.
+Home supplies the visible app card. Keeping separate affinities prevents Home's `singleTask`
+settings launch from clearing/destroying the projection activity above it in a shared task.
+
+`audio/EqualizerController` publishes normalized immutable settings. The optional
+`HostAudio.playbackProcessorFactory` receives original type/channel, sample rate, channel count
+and PCM encoding; only raw `media` + `MEDIA` PCM16 mono/stereo creates `Pcm16Equalizer`. Calls routed
+as media, navigation, Siri and microphone remain outside the DSP path. Each renderer owns filter
+history. Steady Off/flat is an O(1) byte-exact bypass; active processing uses up to ten peaking biquads,
+20 ms bank crossfades. Each bank detects actual PCM sample peaks and applies one linked gain to
+both channels: immediate attenuation, 10 ms hold and 100 ms release, with a final saturation guard.
+The gain is unity until actual output requires limiting; the old theoretical-response preamp cut
+is removed. Per-bank limiting precedes the crossfade so a dry target does not inherit wet limiter
+attenuation. Reused current-frame scratch adds no lookahead/queued delay or callback allocations. It does not change AudioTrack sizing, routing or
+USB startup. DSP/routing tests cannot verify a Linkswell's acoustic output or CPU/connection time.
+The host EQ screen presents all ten stored levels as a curve with named bass/mid/treble bands,
+plus a selected-band slider and large Previous/Next controls. Preview gestures stay local to the UI;
+only release commits to preferences/DSP. The chart redraws on state changes, not on an animation
+loop. Post-EQ music PCM supplies a separate ten-band live spectrum behind the gain curve, even
+with EQ Off; the curve/numbers are gain controls, not measured levels. A visible/STARTED EQ route
+owns an observation handle. Closing the route or stopping its Activity releases analysis. Capture
+uses a nonblocking, bounded reusable slot; spectral transforms run on a separate worker and only
+the Canvas draw scope reads frequent level updates. No microphone, file recording or playback
+buffering is added, and idle clears stale levels. Schema2 stores frequency-named keys and moves old
+five-band gains to nearest new centers, leaving added bands flat and retaining enabled state.
+A one-edit marker/removal prevents old indexes being reinterpreted. The shifted centers mean
+migration is approximate; it does not enable five extra boosted filters on upgrade.
+
+
+`F150Profile` defaults software call AEC Off. A one-time 1.2.4 migration also clears the enabled
+1.2.3 default; later explicit choices persist. The user reports that Off restores voice quality,
+while the external-mic caller echo remains unresolved. Call audio settings write the existing engine preference and apply on a
+new connection. The engine retains per-call speaker references and its platform-effects fallback.
+Call capture reads one transport frame at a time, and original telephony uses a duration-based
+playback start/write plan even when mapped to the media channel. API 31+ requests AudioTrack's
+native start threshold; older/failed-setter paths request two start windows as the effective
+buffer, retaining allocation. Device-clamped values and failures are logged; other stream buffering is retained.
+Exported microphone diagnostics report actual software/platform effect states and batch duration,
+without recording call audio. Desktop tests verify policy and lifecycle, not acoustic effectiveness.
+
 # CarLink architecture
 
 How CarLink is put together: the modules, the processes, how a phone is detected and how a

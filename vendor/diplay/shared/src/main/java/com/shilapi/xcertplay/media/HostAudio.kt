@@ -5,6 +5,28 @@ package com.shilapi.xcertplay.media
  * records exactly as upstream.
  */
 object HostAudio {
+    // CarLink: a fresh processor per renderer prevents parallel tracks sharing filter history.
+    data class PlaybackPcmFormat(
+        val channel: String,
+        val audioType: String,
+        val sampleRate: Int,
+        val channels: Int,
+        val encoding: Int,
+    )
+
+    fun interface PcmProcessor {
+        fun process(data: ByteArray, offset: Int, length: Int)
+    }
+
+    /**
+     * CarLink: optional in-place playback DSP. The original channel/type are supplied before
+     * call-as-media routing. Factories may return null for speech or unsupported PCM formats.
+     * Called only when a renderer is created or its decoded format changes, never per buffer.
+     */
+    @Volatile
+    @JvmStatic
+    var playbackProcessorFactory: ((PlaybackPcmFormat) -> PcmProcessor?)? = null
+
     /**
      * Scales played PCM in place before it is written to the track. The first argument is the
      * stream's own channel (`AudioChannel` name: MEDIA, PHONE, ASSISTANT, NAVIGATION), also when a

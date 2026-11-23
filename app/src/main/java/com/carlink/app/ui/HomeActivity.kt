@@ -10,137 +10,123 @@ import androidx.activity.viewModels
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.carlink.core.core.PhoneKind
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import com.carlink.core.connection.Connection
-import com.carlink.core.entry.UsbWatcher
+import com.carlink.core.entry.AfterUserUnlock
+import com.carlink.app.entry.HomeLauncher
 import com.carlink.app.ui.theme.CarLinkTheme
 import com.carlink.app.ui.theme.UiProfileDetector
-import com.carlink.app.ui.update.UpdateDialog
-import com.carlink.app.ui.update.UpdateDialogActions
-import com.carlink.app.update.UpdatePolicy
-import com.carlink.app.update.UpdateState
-import com.carlink.app.update.Updates
-import com.carlink.app.update.showsDialog
+import kotlinx.coroutines.launch
 
 /** CarLink's launcher and hub. Hosts every CarLink screen (see ui/CarLinkApp.kt). */
 class HomeActivity : ComponentActivity() {
     private val vm: CarLinkViewModel by viewModels()
+    private var ready = false
+    private var newIntentBeforeSetup = false
+    private var pendingSetup: AfterUserUnlock.Pending? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
-        if (savedInstanceState == null) { consumeAutoPhone(intent); consumeRecovery(intent); consumeCarSettings(intent) }
+        pendingSetup = AfterUserUnlock.run(this, this) {
+            if (!isFinishing && !isDestroyed) initializeUi(savedInstanceState)
+        }
+    }
+
+    private fun initializeUi(savedInstanceState: Bundle?) {
+        if (ready) return
+        ready = true
+        enableEdgeToEdge()
+        if (savedInstanceState?.getBoolean(STATE_USB_STARTUP) == true) vm.requestUsbStartupProjection()
+        // Android can retain the original launch extras after recreation. The saved pending
+        // flag is authoritative then; only a genuinely new intent may arm another handoff.
+        if (savedInstanceState == null || newIntentBeforeSetup) consumeLaunchIntent(intent)
         setContent {
             val display by vm.display.collectAsStateWithLifecycle()
             val profile = remember(display.uiProfileMode) { UiProfileDetector.detect(this, display.uiProfileMode) }
             CarLinkTheme(profile, display.themeMode, display.interfaceScale, display.liteRendering) {
                 androidx.compose.foundation.layout.Box {
                     CarLinkApp(vm, onExitToCarHome = ::exitToCarHome)
-                    UpdatePrompt()
                 }
             }
         }
-    }
-
-    /**
-     * The update dialog over every CarLink screen. An offer waits while a projection session is
-     * starting or running (or a phone switch is asked); a download the driver started stays.
-     */
-    @androidx.compose.runtime.Composable
-    private fun UpdatePrompt() {
-        val updater = remember { Updates.get(this) }
-        val state by updater.state.collectAsStateWithLifecycle()
-        val connection = remember { Connection.get(this) }
-        val session by connection.state.collectAsStateWithLifecycle()
-        val pendingSwitch by connection.pendingSwitch.collectAsStateWithLifecycle()
-        val quiet = UpdatePolicy.sessionQuiet(session, pendingSwitch)
-        if (!state.showsDialog || (state is UpdateState.Available && !quiet)) return
-        val actions = remember(updater) {
-            object : UpdateDialogActions {
-                override fun ignore() = updater.ignore()
-                override fun later() = updater.later()
-                override fun download() = updater.download()
-                override fun cancel() = updater.cancel()
-                override fun openSettings() = updater.openInstallPermission()
-                override fun dismiss() = updater.dismiss()
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                vm.automaticProjectionReady.collect { open -> if (open) vm.openStartupProjectionIfReady() }
             }
         }
-        UpdateDialog(state, updater.current.toString(), actions)
+        if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) refreshHome()
     }
 
-    override fun onPause() {
-        window.decorView.removeCallbacks(autoUpdateCheck)
-        super.onPause()
-    }
-
-    /** At most every 6 hours, with Home in front, set up done and no session (UpdatePolicy). */
-    private val autoUpdateCheck = Runnable {
-        if (!UiPreferences(this).setupDone) return@Runnable
-        val connection = Connection.get(this)
-        Updates.get(this).maybeAutoCheck(UpdatePolicy.sessionQuiet(connection.state.value, connection.pendingSwitch.value))
+    override fun onStart() {
+        super.onStart()
+        HomeLauncher.homeStarted(this)
     }
 
     override fun onResume() {
         super.onResume()
-        // After Connection.onHomeShown below had its chance to start a session, and after startup.
-        window.decorView.postDelayed(autoUpdateCheck, UPDATE_CHECK_DELAY_MILLIS)
-        // After the first frames: the ":aa" process start competes with Home's first draw (CarLinkApplication.deferStartupWork).
-        window.decorView.postDelayed({ Connection.prewarm(this) }, PREWARM_DELAY_MILLIS)
-        Connection.onHomeShown(this)
-        vm.refreshPhones()
-        UsbWatcher.get(this).start()
+        if (ready) refreshHome()
     }
 
-    /** Back on Home goes to the car's own launcher, as DiAuto's "Car home" did. */
+    private fun refreshHome() {
+        Connection.onHomeShown(this)
+        vm.refresh()
+    }
+
+    internal fun armUsbStartupProjection() {
+        if (ready && lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED) && vm.isHomeRouteVisible) {
+            vm.requestUsbStartupProjection()
+        }
+    }
+
+    override fun onStop() {
+        HomeLauncher.homeStopped(this)
+        super.onStop()
+    }
+
+    /** Back on Home goes to the car's own launcher, without ending a live phone session. */
     private fun exitToCarHome() {
+        vm.cancelAutomaticProjection()
+        HomeLauncher.homeStopped(this)
         val home = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         runCatching { startActivity(home) }.onFailure { moveTaskToBack(true) }
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        consumeAutoPhone(intent)
-        consumeRecovery(intent)
-        consumeCarSettings(intent)
+        setIntent(intent)
+        if (ready) consumeLaunchIntent(intent)
+        else newIntentBeforeSetup = true
     }
 
-    /** The car tile in CarPlay / Android Auto opens Settings; the phone session keeps running. */
-    private fun consumeCarSettings(intent: Intent) {
-        if (intent.getStringExtra("page") != PAGE_SETTINGS) return
+    /** The car tile overrides a pending startup handoff; USB markers are consumed once. */
+    private fun consumeLaunchIntent(intent: Intent) {
+        val settings = intent.getStringExtra("page") == PAGE_SETTINGS
+        val usbStartup = intent.getBooleanExtra(EXTRA_USB_STARTUP, false)
         intent.removeExtra("page")
-        vm.settingsFromCar.value = true
+        intent.removeExtra(EXTRA_USB_STARTUP)
+        if (settings) vm.openSettingsFromCar()
+        else if (usbStartup) vm.requestUsbStartupProjection()
     }
 
-    /** A phone SystemEventReceiver identified; start its engine now that CarLink is in front. */
-    /**
-     * The CarPlay waiting screen's "Reset CarPlay Wi-Fi" opens Home with DiPlay's
-     * page=wireless-recovery: stop the attempt and remove any Wi-Fi Direct group it left, so the
-     * next Connect starts clean.
-     */
-    private fun consumeRecovery(intent: Intent) {
-        if (intent.getStringExtra("page") != "wireless-recovery") return
-        intent.removeExtra("page")
-        Connection.get(this).stop()
-        val app = applicationContext
-        Thread({ com.carlink.core.engine.WifiDirectReset.removeGroup(app) }, "carlink-wifi-recovery").start()
+    override fun onSaveInstanceState(outState: Bundle) {
+        if (ready) outState.putBoolean(STATE_USB_STARTUP, vm.usbStartupPending)
+        super.onSaveInstanceState(outState)
     }
 
-    private fun consumeAutoPhone(intent: Intent) {
-        val kind = intent.getStringExtra(EXTRA_AUTO_PHONE_KIND)
-            ?.let { runCatching { PhoneKind.valueOf(it) }.getOrNull() } ?: return
-        val address = intent.getStringExtra(EXTRA_AUTO_PHONE_ADDRESS) ?: return
-        val name = intent.getStringExtra(EXTRA_AUTO_PHONE_NAME)
-        intent.removeExtra(EXTRA_AUTO_PHONE_KIND)
-        Connection.get(this).onBluetoothPhone(address, kind, name)
+    override fun onDestroy() {
+        HomeLauncher.homeStopped(this)
+        pendingSetup?.cancel()
+        pendingSetup = null
+        super.onDestroy()
     }
 
     companion object {
-        const val EXTRA_AUTO_PHONE_ADDRESS = "com.carlink.app.extra.AUTO_PHONE_ADDRESS"
-        const val EXTRA_AUTO_PHONE_KIND = "com.carlink.app.extra.AUTO_PHONE_KIND"
-        const val EXTRA_AUTO_PHONE_NAME = "com.carlink.app.extra.AUTO_PHONE_NAME"
-        private const val PREWARM_DELAY_MILLIS = 2_500L
-        private const val UPDATE_CHECK_DELAY_MILLIS = 8_000L
         fun intent(context: Context): Intent = Intent(context, HomeActivity::class.java)
+        fun usbStartupIntent(context: Context): Intent = intent(context).putExtra(EXTRA_USB_STARTUP, true)
+        private const val EXTRA_USB_STARTUP = "com.carlink.app.USB_STARTUP"
+        private const val STATE_USB_STARTUP = "pending_usb_projection"
 
         /** DiPlay's page name for its settings, also used by CarPlay's "CarLink settings" menu button. */
         private const val PAGE_SETTINGS = "settings"

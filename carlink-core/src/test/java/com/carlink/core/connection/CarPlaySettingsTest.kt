@@ -1,172 +1,23 @@
 package com.carlink.core.connection
-
-import android.app.Application
-import com.carlink.core.settings.AudioDelay
-import com.carlink.core.settings.DayNight
-import com.carlink.core.settings.InterfaceSize
-import com.carlink.core.settings.Picture
-import com.carlink.core.settings.UnifiedSettings
-import com.carlink.core.settings.VehicleProfile
-import com.carlink.core.settings.WifiDetails
-import com.carlink.core.settings.WirelessPath
-import com.shilapi.xcertplay.AirPlayPersistence
-import com.shilapi.xcertplay.AppAppearance
-import com.shilapi.xcertplay.CarPlayHostIntegration
-import com.shilapi.xcertplay.hud.BydOutputSettings
-import com.shilapi.xcertplay.media.HostAudio
-import com.shilapi.xcertplay.orchestration.ManualHotspotBand
-import com.shilapi.xcertplay.orchestration.ManualHotspotSecurity
-import com.shilapi.xcertplay.orchestration.WirelessHotspotMode
-import org.junit.After
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotNull
-import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
+import com.carlink.core.settings.*
+import org.junit.Assert.*
 import org.junit.Test
-import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
-import org.robolectric.RuntimeEnvironment
-import org.robolectric.annotation.Config
-
-@RunWith(RobolectricTestRunner::class)
-@Config(sdk = [29], application = Application::class)
 class CarPlaySettingsTest {
-    private val app: Application get() = RuntimeEnvironment.getApplication()
-
-    @After fun restoreHooks() {
-        CarPlayHostIntegration.vehicleIntegrations = true
-        CarPlaySettingsPolicy.appearance = { CarLinkAppearance.DARK }
+    @Test fun customSizeAndPictureKeepTheDriversExactEngineValues() {
+        val mapped = CarPlaySettingsPolicy.map(UnifiedSettings(interfaceSize = InterfaceSize.CUSTOM, picture = Picture.CUSTOM))
+        assertNull(mapped.widthPhysicalMm); assertNull(mapped.displayScalePercent); assertNull(mapped.fps)
+        assertNull(mapped.hevc); assertNull(mapped.directVideoOutput)
     }
-
-    private fun map(settings: UnifiedSettings = UnifiedSettings(), path: WirelessPath? = null,
-                    profile: VehicleProfile = VehicleProfile.GENERIC, location: Boolean = true) =
-        CarPlaySettingsPolicy.map(settings, path, profile, location)
-
-    @Test fun pathsMapToDiPlayBackends() {
-        assertEquals(WirelessHotspotMode.EXISTING_WIFI, map(path = WirelessPath.SAME_WIFI).wirelessMode)
-        assertEquals(WirelessHotspotMode.MANUAL, map(path = WirelessPath.CAR_HOTSPOT).wirelessMode)
-        assertEquals(WirelessHotspotMode.WIFI_P2P, map(path = WirelessPath.WIFI_DIRECT).wirelessMode)
-        assertNull(map(path = null).wirelessMode)
+    @Test fun largerPresetsReportASmallerPhysicalWidthToTheIphone() {
+        assertTrue(CarPlaySettingsPolicy.widthMm(InterfaceSize.LARGE)!! < CarPlaySettingsPolicy.widthMm(InterfaceSize.MEDIUM)!!)
+        assertTrue(CarPlaySettingsPolicy.widthMm(InterfaceSize.MEDIUM)!! < CarPlaySettingsPolicy.widthMm(InterfaceSize.SMALL)!!)
     }
-
-    @Test fun pictureSizeAndNightKeepTheVerifiedMapping() {
-        val best = map(UnifiedSettings(picture = Picture.BEST, interfaceSize = InterfaceSize.SMALL, dayNight = DayNight.SCHEDULE))
-        assertEquals(100, best.displayScalePercent); assertEquals(60, best.fps); assertEquals(350, best.widthPhysicalMm)
-        assertEquals("schedule", best.nightModeKey)
-        val custom = map(UnifiedSettings(picture = Picture.CUSTOM, interfaceSize = InterfaceSize.CUSTOM))
-        assertNull(custom.displayScalePercent); assertNull(custom.fps); assertNull(custom.widthPhysicalMm)
-        assertEquals(75, map(UnifiedSettings(picture = Picture.LIGHT)).displayScalePercent)
-        assertEquals("system", map().nightModeKey)
-    }
-
-    @Test fun audioDelayMapsToDiPlaysMusicBuffers() {
-        fun buffers(delay: AudioDelay) = map(UnifiedSettings(audioDelay = delay)).let { it.wiredMediaBufferMillis to it.wirelessMediaBufferMillis }
-        assertEquals(100 to 300, buffers(AudioDelay.LOW))
-        assertEquals(300 to 300, buffers(AudioDelay.NORMAL))
-        assertEquals(500 to 1000, buffers(AudioDelay.HIGH))
-        // Every value is one DiPlay keeps (MediaAudioBuffer presets), and it reaches DiPlay's preferences.
-        CarPlaySettingsPolicy.apply(app, map(UnifiedSettings(audioDelay = AudioDelay.LOW)))
-        assertEquals(100, AirPlayPersistence.loadMediaBufferMillis(app, wireless = false))
-        assertEquals(300, AirPlayPersistence.loadMediaBufferMillis(app, wireless = true))
-        CarPlaySettingsPolicy.apply(app, map(UnifiedSettings(audioDelay = AudioDelay.HIGH)))
-        assertEquals(500, AirPlayPersistence.loadMediaBufferMillis(app, wireless = false))
-        assertEquals(1000, AirPlayPersistence.loadMediaBufferMillis(app, wireless = true))
-    }
-
-    @Test fun soundSettingsReachDiPlaysAudioHooks() {
-        val values = map(UnifiedSettings(mediaLevelDb = 3, callAudioAsMedia = true, micGainDb = 6, resumeMusic = true))
-        CarPlaySettingsPolicy.apply(app, values)
-        assertNotNull(HostAudio.playbackPcm)
-        assertNotNull(HostAudio.microphonePcm)
-        assertTrue(HostAudio.callsAsMedia)
-        assertTrue(CarPlaySettingsPolicy.resumeMusic)
-        // Back to Normal: DiPlay's own audio path, untouched.
-        CarPlaySettingsPolicy.apply(app, map())
-        assertNull(HostAudio.playbackPcm)
-        assertNull(HostAudio.microphonePcm)
-        assertFalse(HostAudio.callsAsMedia)
-        assertFalse(CarPlaySettingsPolicy.resumeMusic)
-    }
-
-    @Test fun locationOnlyWithThePermission() {
-        // F17: CarLink defaults "send location" on; DiPlay would ask before every start without it.
-        assertTrue(map(UnifiedSettings(sendCarLocation = true), location = true).locationReporting)
-        assertFalse(map(UnifiedSettings(sendCarLocation = true), location = false).locationReporting)
-        assertFalse(map(UnifiedSettings(sendCarLocation = false), location = true).locationReporting)
-    }
-
-    @Test fun genericProfileTurnsEveryBydItemOff() {
-        // F5: UnifiedSettings and DiPlay both default the BYD output on.
-        val generic = map(UnifiedSettings(bydDirections = true)).vehicle
-        assertFalse(generic.integrations)
-        assertFalse(generic.navigationOutput)
-        assertTrue(generic.forceBydExtrasOff)
-        assertEquals("CarLink", generic.oemLabel)
-        val byd = map(UnifiedSettings(bydDirections = true), profile = VehicleProfile.BYD_DILINK).vehicle
-        assertTrue(byd.integrations)
-        assertTrue(byd.navigationOutput)
-        assertFalse(byd.forceBydExtrasOff)
-        assertEquals("BYD", byd.oemLabel)
-        assertFalse(map(UnifiedSettings(bydDirections = false), profile = VehicleProfile.BYD_DILINK).vehicle.navigationOutput)
-    }
-
-    @Test fun applyWritesGenericValuesIntoDiPlay() {
-        BydOutputSettings.setBatteryToIphone(app, true)
-        AirPlayPersistence.saveClusterMapEnabled(app, true)
-        AirPlayPersistence.saveManualHotspotBand(app, ManualHotspotBand.GHZ_5)
-        val settings = UnifiedSettings(homeWifi = WifiDetails("HomeNet", "homepassword"),
-            carHotspot = WifiDetails("Car-AP", ""))
-        CarPlaySettingsPolicy.apply(app, map(settings, WirelessPath.SAME_WIFI))
-
-        assertEquals(WirelessHotspotMode.EXISTING_WIFI, AirPlayPersistence.loadWirelessHotspotMode(app))
-        assertEquals("HomeNet", AirPlayPersistence.loadExistingWifiSsid(app))
-        assertEquals("homepassword", AirPlayPersistence.loadExistingWifiPassphrase(app))
-        assertEquals("Car-AP", AirPlayPersistence.loadManualHotspotSsid(app))
-        assertEquals(ManualHotspotSecurity.OPEN, AirPlayPersistence.loadManualHotspotSecurity(app))
-        // F17: the driver's band is no longer forced to AUTO.
-        assertEquals(ManualHotspotBand.GHZ_5, AirPlayPersistence.loadManualHotspotBand(app))
-        assertFalse(BydOutputSettings.enabled(app))
-        assertFalse(BydOutputSettings.batteryToIphone(app))
-        assertFalse(AirPlayPersistence.loadClusterMapEnabled(app))
-        assertFalse(CarPlayHostIntegration.vehicleIntegrations)
-        assertEquals("CarLink", AirPlayPersistence.loadOemLabel(app))
-    }
-
-    @Test fun clearedSameWifiDetailsAreClearedInDiPlay() {
-        AirPlayPersistence.saveExistingWifiCredentials(app, "OldNet", "oldpassword")
-        CarPlaySettingsPolicy.apply(app, map(UnifiedSettings(homeWifi = WifiDetails()), WirelessPath.WIFI_DIRECT))
-        assertEquals("", AirPlayPersistence.loadExistingWifiSsid(app))
-        assertEquals("", AirPlayPersistence.loadExistingWifiPassphrase(app))
-    }
-
-    @Test fun aCarNameTheDriverTypedIsKept() {
-        AirPlayPersistence.saveOemLabel(app, "Volvo")
-        CarPlaySettingsPolicy.apply(app, map())
-        assertEquals("Volvo", AirPlayPersistence.loadOemLabel(app))
-        AirPlayPersistence.saveOemLabel(app, "CarLink")
-        CarPlaySettingsPolicy.apply(app, map(profile = VehicleProfile.BYD_DILINK))
-        assertEquals("BYD", AirPlayPersistence.loadOemLabel(app))
-        assertTrue(CarPlayHostIntegration.vehicleIntegrations)
-    }
-
-    @Test fun diPlayChromeFollowsCarLinksTheme() {
-        // DiPlay's menu was always dark: CarLink never wrote its appearance (default dark).
-        val keys = CarLinkAppearance.entries.associateWith {
-            CarPlaySettingsPolicy.map(UnifiedSettings(), null, VehicleProfile.GENERIC, true, appearance = it).appearanceKey
-        }
-        assertEquals(mapOf(CarLinkAppearance.FOLLOW_SYSTEM to "auto", CarLinkAppearance.DARK to "dark",
-            CarLinkAppearance.LIGHT to "light"), keys)
-
-        // Without an explicit argument the app's hook decides, and apply writes it into DiPlay.
-        CarPlaySettingsPolicy.appearance = { CarLinkAppearance.LIGHT }
-        CarPlaySettingsPolicy.apply(app, map())
-        assertEquals(AppAppearance.LIGHT, AirPlayPersistence.loadAppAppearance(app))
-        CarPlaySettingsPolicy.appearance = { CarLinkAppearance.FOLLOW_SYSTEM }
-        CarPlaySettingsPolicy.apply(app, map())
-        assertEquals(AppAppearance.AUTO, AirPlayPersistence.loadAppAppearance(app))
-        // A failing hook falls back to DiPlay's own default rather than failing the session start.
-        CarPlaySettingsPolicy.appearance = { error("no preferences") }
-        assertEquals("dark", map().appearanceKey)
+    @Test fun automaticPictureUsesDecoderPolicyAndWiredAudioKeepsItsOriginalDelays() {
+        val choice = PictureChoice(75, 30, false, "test", true)
+        val mapped = CarPlaySettingsPolicy.map(UnifiedSettings(), choice)
+        assertEquals(75, mapped.displayScalePercent); assertEquals(false, mapped.hevc); assertEquals(true, mapped.directVideoOutput)
+        assertEquals(100, CarPlaySettingsPolicy.map(UnifiedSettings(audioDelay = AudioDelay.LOW)).audioBufferMillis)
+        assertEquals(300, mapped.audioBufferMillis)
+        assertEquals(500, CarPlaySettingsPolicy.map(UnifiedSettings(audioDelay = AudioDelay.HIGH)).audioBufferMillis)
     }
 }

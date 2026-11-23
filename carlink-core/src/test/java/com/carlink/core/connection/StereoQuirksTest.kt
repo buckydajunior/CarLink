@@ -17,13 +17,10 @@ class StereoQuirksTest {
         val base = PicturePolicy.ENGINE_DEFAULTS
         val hevcOff = StereoQuirks.PROFILES.first { it.id == "spreadtrum-sc7731e" }.apply(base)
         assertEquals(false, hevcOff.carPlayHevc)
-        assertEquals(PicturePolicy.H264, hevcOff.aaCodec)
         assertNull(hevcOff.carPlayDirectVideo)
-        val direct = StereoQuirks.PROFILES.first { it.id == "unisoc-sc9863a" }.apply(base.copy(aaCodec = "H.265", carPlayHevc = true))
+        val direct = StereoQuirks.PROFILES.first { it.id == "unisoc-sc9863a" }.apply(base.copy(carPlayHevc = true))
         assertEquals(true, direct.carPlayDirectVideo)
-        assertEquals("H.265", direct.aaCodec)
         assertEquals(true, direct.carPlayHevc)
-        assertEquals(base.aaSurfaceView, direct.aaSurfaceView)
     }
 
     @Test fun everyProfileCitesItsEvidenceAndOverridesSomething() {

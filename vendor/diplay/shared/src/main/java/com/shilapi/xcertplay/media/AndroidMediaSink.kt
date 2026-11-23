@@ -1824,6 +1824,7 @@ private class AudioRenderer(
     }
 
     private val pcmChannels = if (format.channels >= 2) 2 else 1
+    private val telephony = format.audioType == "telephony" // CarLink: original type, before media routing
     private val voiceFilter = if (voiceFilter && format.sampleRate > 0) VoiceFilter(format.sampleRate, pcmChannels) else null
 
     private var trackAttributes: AudioAttributes? = null
@@ -1850,10 +1851,13 @@ private class AudioRenderer(
     @Volatile private var navigationAttenuationDb = 0
     private var appliedNavigationAttenuationDb: Int? = null
     private var levelChannel = "" // CarLink: HostAudio.playbackPcm
+    private var playbackProcessor: HostAudio.PcmProcessor? = null // CarLink: per-renderer music DSP
+    private var playbackProcessorFormat: HostAudio.PlaybackPcmFormat? = null // CarLink
     private var pcm = ByteArray(64 * 1024)
     private var playbackStarted = false
     private var prebufferBytes = 0
     private var startThresholdBytes = 0
+    private var prebufferWriteChunkBytes = PREBUFFER_WRITE_CHUNK_BYTES // CarLink: call-sized initial writes
     private var fadeApplied = false
     private var droppedPacketsLogged = false
     private var firstAacPayloadLogged = false
@@ -2092,12 +2096,13 @@ private class AudioRenderer(
         }
         val selection = mappedSelection()
         mappedChannel = selection.channel
+        updatePlaybackProcessor(format.sampleRate, format.channels, encoding) // CarLink
         val streamOverride = channelOverride(selection.channel)
         actualLegacyStreamType = streamOverride.takeIf { it != 0 }
         var attributes = audioAttributesFor(selection, streamOverride)
         trackAttributes = attributes
         val plan = MediaAudioBuffer.plan(selection.channel == AudioChannel.MEDIA,
-            format.sampleRate, format.channels, minBuffer, mediaBufferMillis)
+            format.sampleRate, format.channels, minBuffer, mediaBufferMillis, isTelephony = telephony) // CarLink
         bytesPerSecond = format.sampleRate * frameBytes
         val built: AudioTrack
         var routeLabel: String
@@ -2152,10 +2157,15 @@ private class AudioRenderer(
         diagnosticStage = "track-attributes"
         trackAttributes = audioTrackAttributesForFocus(built, attributes)
         diagnosticStage = "track-capacity"
+        val callBufferDiagnostic = if (telephony) configureCallStart(built, plan.startBytes) else "" // CarLink
         val capacityBytes = built.bufferSizeInFrames * frameBytes
-        startThresholdBytes = MediaAudioBuffer.startBytesFor(plan.startBytes, capacityBytes, PREBUFFER_WRITE_CHUNK_BYTES)
+        // CarLink: lower call startup thresholds also need smaller writes, or a blocking write
+        // can wait on a paused track before the code below gets the chance to call play().
+        if (telephony) prebufferWriteChunkBytes = MediaAudioBuffer.callWriteChunkBytes(
+            format.sampleRate, pcmChannels, capacityBytes)
+        startThresholdBytes = MediaAudioBuffer.startBytesFor(plan.startBytes, capacityBytes, prebufferWriteChunkBytes)
         // Only music plays long enough for the clocks to drift apart; calls keep their echo reference exact.
-        clockTrim = if (mappedChannel == AudioChannel.MEDIA) MediaClockTrim(format.sampleRate, (startThresholdBytes / frameBytes).toLong(),
+        clockTrim = if (mappedChannel == AudioChannel.MEDIA && !telephony) MediaClockTrim(format.sampleRate, (startThresholdBytes / frameBytes).toLong(), // CarLink
             measuresTarget = true) else null
         val trackMetadata = runCatching {
             "api=${Build.VERSION.SDK_INT} trackState=${built.state} trackRate=${built.sampleRate} " +
@@ -2166,7 +2176,7 @@ private class AudioRenderer(
             "rate=${format.sampleRate} channels=${format.channels} " +
             "route=$routeLabel " +
             "bufferMs=${capacityBytes * 1000L / bytesPerSecond} startMs=${startThresholdBytes * 1000L / bytesPerSecond} " +
-            trackMetadata)
+            trackMetadata + callBufferDiagnostic)
         Log.i(
             TAG,
             "audio track prepared type=${format.payloadType} audioType=${format.audioType} " +
@@ -2184,6 +2194,42 @@ private class AudioRenderer(
                 "streamOverride=$streamOverride " +
                 "focus=${if (audioFocusEnabled) "on" else "off"}",
         )
+    }
+
+    /** CarLink: AudioTrack itself must accept the call start level; play() alone does not lower it. */
+    private fun configureCallStart(track: AudioTrack, startBytes: Int): String {
+        val effectiveBefore = track.bufferSizeInFrames
+        val allocated = runCatching { track.bufferCapacityInFrames }.getOrDefault(effectiveBefore)
+            .coerceAtLeast(effectiveBefore).coerceAtLeast(1)
+        val requestedStart = ((startBytes.toLong() + frameBytes - 1) / frameBytes)
+            .coerceIn(1L, allocated.toLong()).toInt()
+        var route = "effective-buffer"
+        var nativeFailure: String? = null
+        var bufferFailure: String? = null
+        var nativeAccepted: Int? = null
+        if (Build.VERSION.SDK_INT >= 31) {
+            val result = runCatching { track.setStartThresholdInFrames(requestedStart) }
+            nativeAccepted = result.getOrNull()?.takeIf { it > 0 }
+            if (nativeAccepted != null) route = "native-start"
+            else nativeFailure = result.exceptionOrNull()?.javaClass?.simpleName ?: "result=${result.getOrNull()}"
+        }
+        if (nativeAccepted == null) {
+            // Older devices use the effective buffer as their start level. Keep the allocation,
+            // but ask for two call windows (at least twice the device minimum), bounded by it.
+            val requestedBuffer = (requestedStart * 2L).coerceAtMost(allocated.toLong()).toInt()
+            val result = runCatching { track.setBufferSizeInFrames(requestedBuffer) }
+            if (result.getOrNull()?.let { it > 0 } != true) {
+                bufferFailure = result.exceptionOrNull()?.javaClass?.simpleName ?: "result=${result.getOrNull()}"
+            }
+        }
+        val effective = track.bufferSizeInFrames
+        val actualStart = if (Build.VERSION.SDK_INT >= 31) {
+            runCatching { track.startThresholdInFrames }.getOrNull()?.takeIf { it > 0 } ?: nativeAccepted
+        } else null
+        return " callBufferRoute=$route allocatedFrames=$allocated effectiveFrames=$effective " +
+            "requestedStartFrames=$requestedStart nativeStartFrames=${actualStart ?: "unavailable"}" +
+            (nativeFailure?.let { " nativeStartFailure=$it" } ?: "") +
+            (bufferFailure?.let { " effectiveBufferFailure=$it" } ?: "")
     }
 
     /** 0 uses usage-based routing; 1–20 attempt legacy stream types supported by the head unit. */
@@ -2238,6 +2284,16 @@ private class AudioRenderer(
         )
         levelChannel = selection.channel.name // CarLink: the level follows the stream's own kind
         return if (speakerphoneCall || HostAudio.callsAsMedia) AudioChannelMapper.playCallOnSpeaker(selection) else selection // CarLink: callsAsMedia
+    }
+
+    // CarLink: leave playback unchanged when decoder metadata disagrees with the configured track.
+    private fun updatePlaybackProcessor(sampleRate: Int, channels: Int, encoding: Int) {
+        val next = if (sampleRate == format.sampleRate && channels == format.channels) {
+            HostAudio.PlaybackPcmFormat(levelChannel, format.audioType, sampleRate, channels, encoding)
+        } else null
+        if (next == playbackProcessorFormat) return // Keep filter history on identical codec notices.
+        playbackProcessorFormat = next
+        playbackProcessor = next?.let { HostAudio.playbackProcessorFactory?.invoke(it) }
     }
 
     private fun audioAttributesFor(selection: AudioChannelSelection): AudioAttributes =
@@ -2440,12 +2496,19 @@ private class AudioRenderer(
                 index == MediaCodec.INFO_TRY_AGAIN_LATER -> return
                 index == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
                     // Vendor metadata inspection must not interrupt otherwise working playback.
-                    if (decoderOutputReports < 4) runCatching {
+                    runCatching {
                         val outputFormat = codec.outputFormat
+                        // CarLink: PCM16 is the track's default; an explicit unsupported encoding
+                        // or a changed rate/channel layout must bypass host DSP, without rerouting.
+                        updatePlaybackProcessor(
+                            outputFormat.intOrNull(MediaFormat.KEY_SAMPLE_RATE) ?: format.sampleRate,
+                            outputFormat.intOrNull(MediaFormat.KEY_CHANNEL_COUNT) ?: format.channels,
+                            outputFormat.intOrNull(MediaFormat.KEY_PCM_ENCODING) ?: AndroidAudioFormat.ENCODING_PCM_16BIT,
+                        )
                         val metadata = "rate=${outputFormat.intOrNull(MediaFormat.KEY_SAMPLE_RATE)} " +
                             "channels=${outputFormat.intOrNull(MediaFormat.KEY_CHANNEL_COUNT)} " +
                             "pcmEncoding=${outputFormat.intOrNull(MediaFormat.KEY_PCM_ENCODING)}"
-                        if (metadata != lastDecoderOutputMetadata) {
+                        if (decoderOutputReports < 4 && metadata != lastDecoderOutputMetadata) {
                             lastDecoderOutputMetadata = metadata
                             decoderOutputReports++
                             report("Audio: decoded format audioType=${format.audioType} codec=${format.codec} $metadata")
@@ -2515,6 +2578,7 @@ private class AudioRenderer(
         applyNavigationAttenuation()
         attenuateNavigation(data, offset, length)
         HostAudio.playbackPcm?.invoke(levelChannel, data, offset, length) // CarLink
+        playbackProcessor?.process(data, offset, length) // CarLink: music only; never microphone PCM
         if (!fadeApplied) {
             applyFadeIn(data, offset, length)
             fadeApplied = true
@@ -2524,7 +2588,7 @@ private class AudioRenderer(
             val writeLength = if (playbackStarted) {
                 length - written
             } else {
-                minOf(length - written, PREBUFFER_WRITE_CHUNK_BYTES)
+                minOf(length - written, prebufferWriteChunkBytes) // CarLink: never batch calls to the music write floor
             }
             val writeStarted = System.nanoTime()
             diagnosticStage = "track-write"
@@ -2647,7 +2711,7 @@ private class AudioRenderer(
 
     private fun maintainPlaybackBuffer() {
         val track = track ?: return
-        if (bufferProgress.shouldRebuffer(mappedChannel == AudioChannel.MEDIA, playbackStarted,
+        if (bufferProgress.shouldRebuffer(mappedChannel == AudioChannel.MEDIA && !telephony, playbackStarted, // CarLink
                 track.underrunCount > underrunsAtPlaybackStart, queue.isEmpty(), track.playbackHeadPosition,
                 startThresholdBytes / 2L)) {
             // The hardware buffer has starved below the recovery floor. Pause without flushing

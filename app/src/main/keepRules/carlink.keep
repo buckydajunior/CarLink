@@ -4,7 +4,7 @@
 # app/build/outputs/mapping/release/configuration.txt (AGP's -printconfiguration).
 #
 # Rules for engine classes live in the engines' consumer files (vendor/diplay/shared,
-# vendor/diauto/app), so a launcher reusing :carlink-core gets them too. CarLink's own code needs
+# and core JNI), so a launcher reusing :carlink-core gets them too. CarLink's own code needs
 # no member keeps: its manifest components are kept by AAPT2, its enums are looked up with direct
 # valueOf/entries calls, and none of it is reached by reflection or JNI.
 
@@ -30,13 +30,7 @@
 # merging and class inlining of these classes stop. Cost: +0.6 % dex (LOW_END_PERFORMANCE.md).
 -keep,allowshrinking,allowobfuscation,allowaccessmodification class com.carlink.**
 -keep,allowshrinking,allowobfuscation,allowaccessmodification class com.shilapi.**
--keep,allowshrinking,allowobfuscation,allowaccessmodification class com.andrerinas.**
 -keep,allowshrinking,allowobfuscation,allowaccessmodification class com.byd.spi.**
-
-# Android 7.x boot classpath (core-libart.jar) has its own com.android.dex.* (dalvik-dx, via DiAuto's
-# dexmaker), which wins over the app's copy. R8 (AGP 9.5) merged Compose/WorkManager/Kotlin methods
-# into com.android.dex.Leb128, so 1.0.8 crashed at launch on Android 7.1 (NoSuchMethodError, issue #21).
--keep class com.android.dex.** { *; }
 
 # Low-end round 5: debug and verbose logcat lines cost string building and a binder-free but
 # locked write per line on every device; release builds drop them. Info and above stay, which is

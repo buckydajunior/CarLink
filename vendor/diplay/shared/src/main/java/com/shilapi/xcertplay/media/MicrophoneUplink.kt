@@ -178,6 +178,7 @@ internal class MicrophoneUplink(
             val recording = state == AudioRecord.RECORDSTATE_RECORDING
             if (recording) {
                 stats.started(nextRecorder.routedDeviceType())
+                if (config.audioType == TELEPHONY) reportCallProcessing(nextRecorder) // CarLink
             } else {
                 Log.w(TAG, "microphone did not start recording state=$state")
                 stats.failure(MicrophoneFailureStage.RECORDING, code = state)
@@ -221,6 +222,25 @@ internal class MicrophoneUplink(
         }
         return echoCancellerFactory(config.frameBytes / 2, config.sampleRate, ECHO_TAIL_MILLIS)
     }
+
+    // CarLink: retain the hardware buffer size; only blocking read batching changes for calls.
+    private fun readBatchBytes(): Int = if (config.audioType == TELEPHONY) config.frameBytes
+        else maxOf(config.frameBytes, MIN_READ_BYTES)
+
+    private fun reportCallProcessing(recorder: MicrophoneRecorder) {
+        val message = "Microphone: call processing nativeEcho=${if (echoCanceller != null) "on" else "off"} " +
+            "platformAec=${effectState(effects.filterIsInstance<AcousticEchoCanceler>().firstOrNull())} " +
+            "platformNs=${effectState(effects.filterIsInstance<NoiseSuppressor>().firstOrNull())} " +
+            "referenceRate=${echoReference?.sampleRate ?: "none"} " +
+            "rate=${config.sampleRate} channels=${config.channels} frameBytes=${config.frameBytes} " +
+            "readBytes=${readBatchBytes()} recorderBufferBytes=$bufferSize " +
+            "routedDeviceType=${recorder.routedDeviceType() ?: "unknown"}"
+        Log.i(TAG, message)
+        runCatching { onDiagnostic(message) }
+    }
+
+    private fun effectState(effect: AudioEffect?): String = if (effect == null) "not-attached"
+        else runCatching { if (effect.enabled) "enabled" else "disabled" }.getOrDefault("unknown")
 
     private fun voiceEffects(sessionId: Int): List<AudioEffect> {
         if (PhoneAudioRoute.carPlayCallsUseCarAudio()) {
@@ -298,7 +318,7 @@ internal class MicrophoneUplink(
     private fun capture(initial: MicrophoneRecorder, socket: DatagramSocket, startedRecording: Boolean) {
         runCatching { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_AUDIO) }
         val frame = ByteArray(config.frameBytes)
-        val readBuffer = ByteArray(maxOf(frame.size, MIN_READ_BYTES))
+        val readBuffer = ByteArray(readBatchBytes()) // CarLink: one negotiated telephony frame per blocking read
         val counters = MicrophoneCounters()
         var current = initial
         val routeInfo = { current.routedDeviceType() }
@@ -313,11 +333,12 @@ internal class MicrophoneUplink(
         /** Carries on with [next], which [recover] left recording; a new recorder starts a new frame and clock. */
         fun resume(next: MicrophoneRecorder) {
             lastAudioNs = System.nanoTime()
-            if (next === current) return
             current = next
             filled = 0
             // Attaching effects to the new recorder's session can drop the native canceller; see voiceEffects.
             if (echoCanceller == null) canceller = null
+            // CarLink: stop/start resets AudioRecord timestamp framePosition even for the
+            // same object. Retaining samplesRead would shift the echo reference into the future.
             clock = canceller?.let { CaptureClock(config.sampleRate) }
         }
 
@@ -352,6 +373,7 @@ internal class MicrophoneUplink(
                         noAudioRestarts++
                         lastAudioNs = now
                         if (restartRecording(current)) {
+                            resume(current) // CarLink: discard a partial pre-restart frame and reset its capture clock.
                             stats.restarted(noAudioRestarts, "no-audio", current.routedDeviceType())
                         } else {
                             stats.failure(MicrophoneFailureStage.RECORDING, code = current.recordingState)
@@ -453,6 +475,7 @@ internal class MicrophoneUplink(
                 failedCommunicationRecorders = 0
                 stats.restarted(attempt, reason, next.routedDeviceType(), newRecorder = true,
                     platformEffects = enabledEffectNames())
+                if (config.audioType == TELEPHONY) reportCallProcessing(next) // CarLink
                 return next
             }
             stats.restartFailed(attempt, reason, newRecorder = true, state = state)
@@ -607,6 +630,7 @@ internal class MicrophoneUplink(
             val enabled = runCatching { aec.setEnabled(true) == AudioEffect.SUCCESS && aec.enabled }.getOrDefault(false)
             if (enabled) {
                 Log.i(TAG, "microphone native echo processing stopped; platform AEC restored")
+                recorder?.let(::reportCallProcessing) // CarLink: export the actual fallback processing state.
                 return
             }
             effects = effects - aec
@@ -617,6 +641,7 @@ internal class MicrophoneUplink(
             if (session != null && AcousticEchoCanceler.isAvailable()) AcousticEchoCanceler.create(session) else null
         }?.let { effects = effects + it }
         Log.i(TAG, "microphone native echo processing stopped; using platform effects")
+        recorder?.let(::reportCallProcessing) // CarLink
     }
 
     override fun close() {
